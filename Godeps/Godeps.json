@@ -1,0 +1,17 @@
+{
+	"ImportPath": "github.com/ziyan/gatewaysshd",
+	"GoVersion": "go1.4.2",
+	"Packages": [
+		"./..."
+	],
+	"Deps": [
+		{
+			"ImportPath": "github.com/golang/glog",
+			"Rev": "44145f04b68cf362d9c4df2182967c2275eaefed"
+		},
+		{
+			"ImportPath": "golang.org/x/crypto/ssh",
+			"Rev": "60052bd85f2d91293457e8811b0cf26b773de469"
+		}
+	]
+}
