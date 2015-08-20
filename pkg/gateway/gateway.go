@@ -2,8 +2,13 @@ package gateway
 
 import (
 	"bytes"
+	"fmt"
+	"io"
 	"net"
+	"sort"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/golang/glog"
 	"golang.org/x/crypto/ssh"
@@ -55,20 +60,20 @@ func NewGateway(caPublicKey, hostPrivateKey []byte) (*Gateway, error) {
 }
 
 func (g *Gateway) HandleConnection(c net.Conn) {
-	glog.Infof("gatewaysshd: new tcp connection from %s to %s", c.RemoteAddr(), c.LocalAddr())
+	glog.V(1).Infof("new tcp connection: remote = %s, local = %s", c.RemoteAddr(), c.LocalAddr())
 
 	connection, channels, requests, err := ssh.NewServerConn(c, g.config)
 	if err != nil {
-		glog.Infof("gatewaysshd: failed during ssh handshake: %s", err)
+		glog.Warningf("failed during ssh handshake: %s", err)
 		return
 	}
 
 	// create a session and handle it
 	session, err := NewSession(g, connection)
 	if err != nil {
-		glog.Errorf("gatewaysshd: failed to create session: %s", err)
+		glog.Errorf("failed to create session: %s", err)
 		if err := connection.Close(); err != nil {
-			glog.Warningf("gatewaysshd: failed to close connection: %s", err)
+			glog.Warningf("failed to close connection: %s", err)
 		}
 		return
 	}
@@ -94,21 +99,52 @@ func (g *Gateway) DeleteSession(s *Session) {
 	sessions := make([]*Session, 0, len(g.sessions[s.User()]))
 	for _, session := range g.sessions[s.User()] {
 		if session != s {
-			sessions = append(sessions, s)
+			sessions = append(sessions, session)
 		}
 	}
 	g.sessions[s.User()] = sessions
 }
 
-func (g *Gateway) LookupSessionForService(user, service string, port uint16) *Session {
+func (g *Gateway) LookupSessionService(host string, port uint16) (*Session, string, uint16) {
 	g.lock.Lock()
 	defer g.lock.Unlock()
 
-	for _, session := range g.sessions[user] {
-		if session.LookupService(service, port) {
-			return session
+	parts := strings.Split(host, ".")
+	for i := range parts {
+		host := strings.Join(parts[:i], ".")
+		user := strings.Join(parts[i:], ".")
+
+		for _, session := range g.sessions[user] {
+			if session.LookupService(host, port) {
+				glog.V(1).Infof("lookup: found service: user = %s, host = %s, port = %d", user, host, port)
+				return session, host, port
+			}
 		}
 	}
 
-	return nil
+	glog.V(1).Infof("lookup: did not find service: host = %s, port = %d", host, port)
+	return nil, "", 0
+}
+
+func (g *Gateway) ListSessions(w io.Writer) {
+	g.lock.Lock()
+	defer g.lock.Unlock()
+
+	sessions := make(SessionsList, 0)
+	for _, s := range g.sessions {
+		sessions = append(sessions, s...)
+	}
+	sort.Sort(sessions)
+
+	for _, session := range sessions {
+
+		services := make([]string, 0)
+		for host, ports := range session.Services() {
+			for _, port := range ports {
+				services = append(services, fmt.Sprintf("%s:%d", host, port))
+			}
+		}
+
+		fmt.Fprintf(w, "%s\t%v\t%d\t%s\n", session.User(), session.RemoteAddr(), uint64(time.Since(session.Created()).Seconds()), strings.Join(services, ","))
+	}
 }

@@ -41,7 +41,7 @@ func main() {
 	}
 
 	// listen
-	glog.Warningf("gatewaysshd: server listening on %s", *LISTEN)
+	glog.Infof("listening on %s", *LISTEN)
 	listener, err := net.Listen("tcp", *LISTEN)
 	if err != nil {
 		panic(err)
@@ -51,7 +51,7 @@ func main() {
 	for {
 		tcp, err := listener.Accept()
 		if err != nil {
-			glog.Warningf("gatewaysshd: failed to accept incoming tcp connection: %s", err)
+			glog.Warningf("failed to accept incoming tcp connection: %s", err)
 			continue
 		}
 
