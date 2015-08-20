@@ -3,7 +3,7 @@
 What is `gatewaysshd`?
 ===========
 
-`gatewaysshd` is a daemon that provides a meeting place for all your SSH tunnels. It is especially useful if you have many hard-to-reach machines running behind firewalls and you want to access them in over SSH from anywhere in the world.
+`gatewaysshd` is a daemon that provides a meeting place for all your SSH tunnels. It is especially useful if you have many hard-to-reach machines running behind firewalls and you want to access services running on them over SSH from anywhere in the world.
 
 For example, if you have a workstation in the office, you can use `supervisor` or `upstart` or something similar to run a SSH client and make it stay always connected:
 
