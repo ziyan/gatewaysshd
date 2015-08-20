@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -14,6 +15,10 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+var (
+	ErrInvalidCertificate = errors.New("gatewaysshd: invalid certificate")
+)
+
 type Gateway struct {
 	config        *ssh.ServerConfig
 	sessionsIndex map[string][]*Session
@@ -21,7 +26,7 @@ type Gateway struct {
 	lock          *sync.Mutex
 }
 
-func NewGateway(caPublicKey, hostPrivateKey []byte) (*Gateway, error) {
+func NewGateway(caPublicKey, hostCertificate, hostPrivateKey []byte) (*Gateway, error) {
 
 	// parse certificate authority
 	ca, _, _, _, err := ssh.ParseAuthorizedKey(caPublicKey)
@@ -30,12 +35,33 @@ func NewGateway(caPublicKey, hostPrivateKey []byte) (*Gateway, error) {
 	}
 	glog.V(9).Infof("auth: ca_public_key = %v", ca)
 
-	// parse host key
-	host, err := ssh.ParsePrivateKey(hostPrivateKey)
+	// parse host certificate
+	parsed, _, _, _, err := ssh.ParseAuthorizedKey(hostCertificate)
 	if err != nil {
 		return nil, err
 	}
-	glog.V(9).Infof("auth: host_private_key = %v", host.PublicKey())
+	cert, ok := parsed.(*ssh.Certificate)
+	if !ok {
+		return nil, ErrInvalidCertificate
+	}
+
+	principal := "localhost"
+	if len(cert.ValidPrincipals) > 0 {
+		principal = cert.ValidPrincipals[0]
+	}
+
+	// parse host key
+	key, err := ssh.ParsePrivateKey(hostPrivateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	// create signer for host
+	host, err := ssh.NewCertSigner(cert, key)
+	if err != nil {
+		return nil, err
+	}
+	glog.V(9).Infof("auth: host_public_key = %v", key.PublicKey())
 
 	// create checker
 	// TODO: implement IsRevoked
@@ -47,6 +73,12 @@ func NewGateway(caPublicKey, hostPrivateKey []byte) (*Gateway, error) {
 			glog.V(9).Infof("auth: unknown authority: %v", key)
 			return false
 		},
+	}
+
+	// test the checker
+	glog.V(9).Infof("auth: testing host certificate using principal: %s", principal)
+	if err := checker.CheckCert(principal, cert); err != nil {
+		return nil, err
 	}
 
 	// create server config
