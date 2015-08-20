@@ -63,6 +63,17 @@ The output certificate should be named `id_rsa.john.doe-cert.pub`. After the use
 * `id_rsa.john.doe.pub` is the public key
 * `id_rsa.john.doe-cert.pub` is the certificate
 
-When connecting to the server, the user should use `-i ~/.ssh/id_rsa.john.doe` to specify the identity, and they also need to use an approved username in the certificate.
+When connecting to the server, the user should use `-i ~/.ssh/id_rsa.john.doe` to specify the identity, and they also have to use an approved username in the certificate, for example `ssh -i ~/.ssh/id_rsa.john.doe john@gateway-1`.
 
+Trusting the Certificate Authority
+----------------------------------
 
+To get rid of the `The authenticity of host can't be established` prompt for your users, you will need to add the public key of the certificate authority in the user's `~/.ssh/known_hosts` file in the following format:
+
+```
+@cert-authority *.example.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQA... ca@example.com
+```
+
+* `*.example.com` is the principal that this certificate authority is valid for, obviously it needs to include all of your `gatewaysshd` servers
+
+After that, the user will not need to confirm host identity if everything is authenticated successfully.
