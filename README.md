@@ -8,13 +8,17 @@ What is `gatewaysshd`?
 For example, if you have a workstation in the office, you can use `supervisor` or `upstart` or something similar to run a SSH client as a respawning daemon and make it stay always connected:
 
 ```
-ssh -T -N workstation@gateway -R ssh:22:localhost:22
+$ ssh -T -N workstation@gateway -R ssh:22:localhost:22
 ```
 
 At home you can ssh to your workstation simply by:
 
 ```
-ssh -T -N username@gateway -L 2222:ssh.workstation:22
+$ ssh -T -N username@gateway -L 2222:ssh.workstation:22
+```
+
+```
+$ ssh -p 2222 localhost
 ```
 
 You can check what sessions are connected on the gateway server:
