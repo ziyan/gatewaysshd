@@ -21,7 +21,7 @@ Each server that runs `gatewaysshd` needs a host key and a signed certificate. S
 ssh-keygen -t rsa -b 2048 -N "" -f id_rsa.gateway-1.example.com
 ```
 
-Then we will need to sign the public key `id_rsa.gateway-1.example.com.pub` for this host using the certificate authority.
+Then we will need to sign the public key `id_rsa.gateway-1.example.com.pub` for this host using the certificate authority. If you don't own the certificate authority, you may need to send only this `.pub` file to the certificate authority for them to sign it.
 
 ```
 ssh-keygen -s id_rsa.ca -I gateway-1.example.com -h -n gateway-1.example.com,gateway-1 -V +52w id_rsa.gateway-1.example.com.pub
@@ -34,6 +34,12 @@ ssh-keygen -s id_rsa.ca -I gateway-1.example.com -h -n gateway-1.example.com,gat
 * `-V` specifies the validity period
 
 Make sure the output of the command above says `Signed host key`. If it says `Signed user key`, then you probably forgot to supply the `-h` argument. After the command succeeds, you should get a file called `id_rsa.gateway-1.example.com-cert.pub`, that's the host certificate. There are many more options to customize your certificate, see `ssh-keygen -h`.
+
+To run an instance of `gatewaysshd`, you will need three files:
+
+* `id_rsa.gateway-1.example.com` is the private key, make sure no group or world access is allowed on this file
+* `id_rsa.gateway-1.example.com-cert.pub` is the certificate
+* `id_rsa.ca.pub` is the certificate authority's public key
 
 User Key and Certificate
 ------------------------
@@ -50,3 +56,13 @@ ssh-keygen -t rsa -b 2048 -N "" -f id_rsa.john.doe
 ```
 ssh-keygen -s id_rsa.ca -I john.doe -n john.doe,john -V +52w id_rsa.john.doe.pub
 ```
+
+The output certificate should be named `id_rsa.john.doe-cert.pub`. After the user received the signed certificate back from the authority, they should keep all three files together in their `~/.ssh` folder:
+
+* `id_rsa.john.doe` is the private key, make sure no group or world access is allowed on this file
+* `id_rsa.john.doe.pub` is the public key
+* `id_rsa.john.doe-cert.pub` is the certificate
+
+When connecting to the server, the user should use `-i ~/.ssh/id_rsa.john.doe` to specify the identity, and they also need to use an approved username in the certificate.
+
+
