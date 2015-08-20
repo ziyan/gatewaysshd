@@ -21,6 +21,7 @@ type Channel struct {
 }
 
 func NewChannel(session *Session, channel ssh.Channel, channelType string, extraData []byte) (*Channel, error) {
+	glog.V(1).Infof("new channel: user = %s, remote = %v, type = %s", session.User(), session.RemoteAddr(), channelType)
 	return &Channel{
 		session:     session,
 		channel:     channel,
@@ -37,7 +38,7 @@ func (c *Channel) Close() {
 		if err := c.channel.Close(); err != nil {
 			glog.Warningf("failed to close channel: %s", err)
 		}
-		glog.V(1).Infof("channel closed: %s", c.Session().User())
+		glog.V(1).Infof("channel closed: user = %s, remote = %v, type = %s", c.Session().User(), c.Session().RemoteAddr(), c.channelType)
 	})
 }
 
@@ -58,7 +59,7 @@ func (c *Channel) HandleRequests(requests <-chan *ssh.Request) {
 }
 
 func (c *Channel) HandleRequest(request *ssh.Request) {
-	glog.V(2).Infof("request received: type = %s, want_reply = %v, payload = %v", request.Type, request.WantReply, request.Payload)
+	glog.V(9).Infof("request received: type = %s, want_reply = %v, payload = %v", request.Type, request.WantReply, request.Payload)
 
 	// check parameters
 	ok := false

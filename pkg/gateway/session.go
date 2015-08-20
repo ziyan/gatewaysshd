@@ -30,6 +30,8 @@ type Session struct {
 }
 
 func NewSession(gateway *Gateway, connection *ssh.ServerConn) (*Session, error) {
+	glog.V(1).Infof("new session: user = %s, remote = %v", connection.User(), connection.RemoteAddr())
+
 	return &Session{
 		gateway:    gateway,
 		connection: connection,
@@ -47,7 +49,8 @@ func (s *Session) Close() {
 	s.closeOnce.Do(func() {
 		s.active = false
 		s.Gateway().DeleteSession(s)
-		glog.V(1).Infof("session closed: %s", s.user)
+
+		glog.V(1).Infof("session closed: user = %s, remote = %v", s.User(), s.RemoteAddr())
 	})
 }
 
@@ -90,6 +93,13 @@ func (s *Session) DeleteChannel(c *Channel) {
 		}
 	}
 	s.channels = channels
+}
+
+func (s *Session) ChannelsCount() int {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	return len(s.channels)
 }
 
 func (s *Session) Services() map[string][]uint16 {
@@ -164,10 +174,9 @@ func (s *Session) HandleChannels(channels <-chan ssh.NewChannel) {
 }
 
 func (s *Session) HandleRequest(request *ssh.Request) {
-	glog.V(2).Infof("request received: type = %s, want_reply = %v, payload = %v", request.Type, request.WantReply, request.Payload)
-	ok := false
-	var reply []byte
+	glog.V(9).Infof("request received: type = %s, want_reply = %v, payload = %v", request.Type, request.WantReply, request.Payload)
 
+	ok := false
 	switch request.Type {
 	case "tcpip-forward":
 		request, err := UnmarshalForwardRequest(request.Payload)
@@ -176,13 +185,18 @@ func (s *Session) HandleRequest(request *ssh.Request) {
 			break
 		}
 
+		if request.Port == 0 {
+			glog.Errorf("requested forwarding port is not allowed: %d", request.Port)
+			break
+		}
+
 		if err := s.RegisterService(request.Host, uint16(request.Port)); err != nil {
 			glog.Errorf("failed to register service in session: %s", err)
 			break
 		}
 
-		reply = MarshalForwardReply(&ForwardReply{Port: request.Port})
 		ok = true
+
 	case "cancel-tcpip-forward":
 		request, err := UnmarshalForwardRequest(request.Payload)
 		if err != nil {
@@ -196,17 +210,18 @@ func (s *Session) HandleRequest(request *ssh.Request) {
 		}
 
 		ok = true
+
 	}
 
 	if request.WantReply {
-		if err := request.Reply(ok, reply); err != nil {
+		if err := request.Reply(ok, nil); err != nil {
 			glog.Warningf("failed to reply to request: %s", err)
 		}
 	}
 }
 
 func (s *Session) HandleChannel(newChannel ssh.NewChannel) {
-	glog.V(2).Infof("new channel: type = %s, data = %v", newChannel.ChannelType(), newChannel.ExtraData())
+	glog.V(9).Infof("new channel: type = %s, data = %v", newChannel.ChannelType(), newChannel.ExtraData())
 
 	ok := false
 	rejection := ssh.UnknownChannelType
@@ -326,7 +341,7 @@ func (s *Session) HandleDirectChannel(newChannel ssh.NewChannel) (bool, ssh.Reje
 
 // open a channel from the server to the client side
 func (s *Session) OpenChannel(channelType string, extraData []byte) (*Channel, error) {
-	glog.V(2).Infof("opening channel: type = %s, data = %v", channelType, extraData)
+	glog.V(9).Infof("opening channel: type = %s, data = %v", channelType, extraData)
 
 	channel, requests, err := s.connection.OpenChannel(channelType, extraData)
 	if err != nil {

@@ -19,3 +19,8 @@ save:
 .PHONY: test
 test:
 	@godep go test ./...
+
+.PHONY: docker
+docker: build
+	@docker build -t ziyan/gatewaysshd .
+

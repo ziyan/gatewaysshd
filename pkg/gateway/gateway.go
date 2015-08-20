@@ -28,27 +28,35 @@ func NewGateway(caPublicKey, hostPrivateKey []byte) (*Gateway, error) {
 	if err != nil {
 		return nil, err
 	}
+	glog.V(9).Infof("auth: ca_public_key = %v", ca)
 
 	// parse host key
 	host, err := ssh.ParsePrivateKey(hostPrivateKey)
 	if err != nil {
 		return nil, err
 	}
+	glog.V(9).Infof("auth: host_private_key = %v", host.PublicKey())
 
 	// create checker
 	// TODO: implement IsRevoked
 	checker := &ssh.CertChecker{
 		IsAuthority: func(key ssh.PublicKey) bool {
-			// TODO: logging
-			return bytes.Compare(ca.Marshal(), key.Marshal()) == 0
+			if bytes.Compare(ca.Marshal(), key.Marshal()) == 0 {
+				return true
+			}
+			glog.V(9).Infof("auth: unknown authority: %v", key)
+			return false
 		},
 	}
 
 	// create server config
 	config := &ssh.ServerConfig{
 		PublicKeyCallback: func(meta ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
-			// TODO: logging
+			glog.V(9).Infof("auth: remote = %s, local = %s, public_key = %v", meta.RemoteAddr(), meta.LocalAddr(), key)
 			return checker.Authenticate(meta, key)
+		},
+		AuthLogCallback: func(meta ssh.ConnMetadata, method string, err error) {
+			glog.V(2).Infof("auth: remote = %s, local = %s, method = %s, error = %v", meta.RemoteAddr(), meta.LocalAddr(), method, err)
 		},
 	}
 	config.AddHostKey(host)
@@ -133,7 +141,7 @@ func (g *Gateway) LookupSessionService(host string, port uint16) (*Session, stri
 		}
 	}
 
-	glog.V(1).Infof("lookup: did not find service: host = %s, port = %d", host, port)
+	glog.V(1).Infof("lookup: failed to find service: host = %s, port = %d", host, port)
 	return nil, "", 0
 }
 
@@ -150,6 +158,6 @@ func (g *Gateway) ListSessions(w io.Writer) {
 		}
 		sort.Strings(services)
 
-		fmt.Fprintf(w, "%s\t%v\t%d\t%s\n", session.User(), session.RemoteAddr(), uint64(time.Since(session.Created()).Seconds()), strings.Join(services, ","))
+		fmt.Fprintf(w, "%s\t%v\t%d\t%d\t%s\n", session.User(), session.RemoteAddr(), session.ChannelsCount(), uint64(time.Since(session.Created()).Seconds()), strings.Join(services, ","))
 	}
 }
