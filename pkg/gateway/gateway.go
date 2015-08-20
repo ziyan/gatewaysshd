@@ -15,9 +15,10 @@ import (
 )
 
 type Gateway struct {
-	config   *ssh.ServerConfig
-	sessions map[string][]*Session
-	lock     *sync.Mutex
+	config        *ssh.ServerConfig
+	sessionsIndex map[string][]*Session
+	sessionsList  []*Session
+	lock          *sync.Mutex
 }
 
 func NewGateway(caPublicKey, hostPrivateKey []byte) (*Gateway, error) {
@@ -53,9 +54,10 @@ func NewGateway(caPublicKey, hostPrivateKey []byte) (*Gateway, error) {
 	config.AddHostKey(host)
 
 	return &Gateway{
-		config:   config,
-		sessions: make(map[string][]*Session),
-		lock:     &sync.Mutex{},
+		config:        config,
+		sessionsIndex: make(map[string][]*Session),
+		sessionsList:  make([]*Session, 0),
+		lock:          &sync.Mutex{},
 	}, nil
 }
 
@@ -87,7 +89,9 @@ func (g *Gateway) HandleConnection(c net.Conn) {
 func (g *Gateway) AddSession(s *Session) {
 	g.lock.Lock()
 	defer g.lock.Unlock()
-	g.sessions[s.User()] = append([]*Session{s}, g.sessions[s.User()]...)
+
+	g.sessionsIndex[s.User()] = append([]*Session{s}, g.sessionsIndex[s.User()]...)
+	g.sessionsList = append([]*Session{s}, g.sessionsList...)
 
 }
 
@@ -95,14 +99,21 @@ func (g *Gateway) DeleteSession(s *Session) {
 	g.lock.Lock()
 	defer g.lock.Unlock()
 
-	// filter the list of sessions
-	sessions := make([]*Session, 0, len(g.sessions[s.User()]))
-	for _, session := range g.sessions[s.User()] {
+	sessions := make([]*Session, 0, len(g.sessionsIndex[s.User()]))
+	for _, session := range g.sessionsIndex[s.User()] {
 		if session != s {
 			sessions = append(sessions, session)
 		}
 	}
-	g.sessions[s.User()] = sessions
+	g.sessionsIndex[s.User()] = sessions
+
+	sessions = make([]*Session, 0, len(g.sessionsList))
+	for _, session := range g.sessionsList {
+		if session != s {
+			sessions = append(sessions, session)
+		}
+	}
+	g.sessionsList = sessions
 }
 
 func (g *Gateway) LookupSessionService(host string, port uint16) (*Session, string, uint16) {
@@ -114,7 +125,7 @@ func (g *Gateway) LookupSessionService(host string, port uint16) (*Session, stri
 		host := strings.Join(parts[:i], ".")
 		user := strings.Join(parts[i:], ".")
 
-		for _, session := range g.sessions[user] {
+		for _, session := range g.sessionsIndex[user] {
 			if session.LookupService(host, port) {
 				glog.V(1).Infof("lookup: found service: user = %s, host = %s, port = %d", user, host, port)
 				return session, host, port
@@ -130,20 +141,14 @@ func (g *Gateway) ListSessions(w io.Writer) {
 	g.lock.Lock()
 	defer g.lock.Unlock()
 
-	sessions := make(SessionsList, 0)
-	for _, s := range g.sessions {
-		sessions = append(sessions, s...)
-	}
-	sort.Sort(sessions)
-
-	for _, session := range sessions {
-
+	for _, session := range g.sessionsList {
 		services := make([]string, 0)
 		for host, ports := range session.Services() {
 			for _, port := range ports {
 				services = append(services, fmt.Sprintf("%s:%d", host, port))
 			}
 		}
+		sort.Strings(services)
 
 		fmt.Fprintf(w, "%s\t%v\t%d\t%s\n", session.User(), session.RemoteAddr(), uint64(time.Since(session.Created()).Seconds()), strings.Join(services, ","))
 	}
