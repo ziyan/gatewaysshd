@@ -42,7 +42,7 @@ Certificate Authority
 Generate a ssh key to be used as the certificate authority. You should set a password on this key to protect it well.
 
 ```
-ssh-keygen -t rsa -b 4096 -f id_rsa.ca
+$ ssh-keygen -t rsa -b 4096 -f id_rsa.ca
 ```
 
 Host Key and Certificate
@@ -51,13 +51,13 @@ Host Key and Certificate
 Each server that runs `gatewaysshd` needs a host key and a signed certificate. Suppose the hostname of the server is `gateway-1.example.com`. First, we generate the private key and public key pair:
 
 ```
-ssh-keygen -t rsa -b 2048 -N "" -f id_rsa.gateway-1.example.com
+$ ssh-keygen -t rsa -b 2048 -N "" -f id_rsa.gateway-1.example.com
 ```
 
 Then we will need to sign the public key `id_rsa.gateway-1.example.com.pub` for this host using the certificate authority. If you don't own the certificate authority, you may need to send only this `.pub` file to the certificate authority for them to sign it.
 
 ```
-ssh-keygen -s id_rsa.ca -I gateway-1.example.com -h -n gateway-1.example.com,gateway-1 -V +52w id_rsa.gateway-1.example.com.pub
+$ ssh-keygen -s id_rsa.ca -I gateway-1.example.com -h -n gateway-1.example.com,gateway-1 -V +52w id_rsa.gateway-1.example.com.pub
 ```
 
 * `-s` specifies the path to your certificate authority
@@ -83,11 +83,11 @@ For clients that connects to an instance of `gatewaysshd`, each of them also nee
 * `-n` is also a comma seperated list of principals, but it should be a list of usernames instead of hostnames, the user can only use one of the usernames specified in this list of principals to connect
 
 ```
-ssh-keygen -t rsa -b 2048 -N "" -f id_rsa.john.doe
+$ ssh-keygen -t rsa -b 2048 -N "" -f id_rsa.john.doe
 ```
 
 ```
-ssh-keygen -s id_rsa.ca -I john.doe -n john.doe,john -V +52w id_rsa.john.doe.pub
+$ ssh-keygen -s id_rsa.ca -I john.doe -n john.doe,john -V +52w id_rsa.john.doe.pub
 ```
 
 The output certificate should be named `id_rsa.john.doe-cert.pub`. After the user received the signed certificate back from the authority, they should keep all three files together in their `~/.ssh` folder:
