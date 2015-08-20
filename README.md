@@ -1,6 +1,6 @@
 [![Build Status](https://travis-ci.org/ziyan/gatewaysshd.svg?branch=master)](https://travis-ci.org/ziyan/gatewaysshd)
 
-What is it?
+What is `gatewaysshd`?
 ===========
 
 `gatewaysshd` is a daemon that provides a meeting place for all your SSH tunnels. It is especially useful if you have many hard-to-reach machines running behind firewalls and you want to access them in over SSH from anywhere in the world.
