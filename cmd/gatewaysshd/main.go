@@ -15,6 +15,7 @@ var (
 	CA_PUBLIC_KEY    = flag.String("ca-public-key", "id_rsa.ca.pub", "path to certificate authority public key")
 	HOST_CERTIFICATE = flag.String("host-certificate", "id_rsa.host-cert.pub", "path to host certificate")
 	HOST_PRIVATE_KEY = flag.String("host-private-key", "id_rsa.host", "path to host private key")
+	SERVER_VERSION   = flag.String("server-version", "SSH-2.0-gatewaysshd", "ssh server version")
 )
 
 func main() {
@@ -41,7 +42,7 @@ func main() {
 	}
 
 	// create gateway
-	gateway, err := gateway.NewGateway(caPublicKey, hostCertificate, hostPrivateKey)
+	gateway, err := gateway.NewGateway(*SERVER_VERSION, caPublicKey, hostCertificate, hostPrivateKey)
 	if err != nil {
 		panic(err)
 	}

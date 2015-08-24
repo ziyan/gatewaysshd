@@ -26,7 +26,7 @@ type Gateway struct {
 	lock          *sync.Mutex
 }
 
-func NewGateway(caPublicKey, hostCertificate, hostPrivateKey []byte) (*Gateway, error) {
+func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateKey []byte) (*Gateway, error) {
 
 	// parse certificate authority
 	ca, _, _, _, err := ssh.ParseAuthorizedKey(caPublicKey)
@@ -90,6 +90,7 @@ func NewGateway(caPublicKey, hostCertificate, hostPrivateKey []byte) (*Gateway, 
 		AuthLogCallback: func(meta ssh.ConnMetadata, method string, err error) {
 			glog.V(2).Infof("auth: remote = %s, local = %s, method = %s, error = %v", meta.RemoteAddr(), meta.LocalAddr(), method, err)
 		},
+		ServerVersion: serverVersion,
 	}
 	config.AddHostKey(host)
 
