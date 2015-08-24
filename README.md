@@ -1,7 +1,40 @@
-gatewaysshd
+[![Build Status](https://travis-ci.org/ziyan/gatewaysshd.svg?branch=master)](https://travis-ci.org/ziyan/gatewaysshd)
+
+What is `gatewaysshd`?
 ===========
 
-[![Build Status](https://travis-ci.org/ziyan/gatewaysshd.svg?branch=master)](https://travis-ci.org/ziyan/gatewaysshd)
+`gatewaysshd` is a daemon that provides a meeting place for all your SSH tunnels. It is especially useful if you have many hard-to-reach machines running behind firewalls and you want to access services running on them over SSH from anywhere in the world.
+
+For example, if you have a workstation in the office, you can use `supervisor` or `upstart` or something similar to run a SSH client as a respawning daemon and make it stay always connected:
+
+```
+$ ssh -T -N workstation@gateway -R ssh:22:localhost:22
+```
+
+At home you can ssh to your workstation simply by:
+
+```
+$ ssh -T -N username@gateway -L 2222:ssh.workstation:22
+```
+
+```
+$ ssh -p 2222 localhost
+```
+
+You can check what sessions are connected on the gateway server:
+
+```
+$ ssh -T username@gateway
+username	1.2.3.4:44604	0	
+workstation	5.6.7.8:23203	1	ssh:22,web:80
+```
+
+When you remote forward a local port, `gatewaysshd` does not actually open the port on the server side. The ports you specified is a virtual concept for `gatewaysshd`. It simply keeps track of forwarded ports and internally connect and tunnel the ports when requested by another client. This relieves you the burden of assigning managing ports on the server side.
+
+You also specifies a service name for the remote forwarded port, `ssh` or `web` for example. When connecting to these services from another client, they can be referred to as `service.username` just like a normal hostname.
+
+Key Management
+==============
 
 Certificate Authority
 ---------------------
@@ -9,7 +42,7 @@ Certificate Authority
 Generate a ssh key to be used as the certificate authority. You should set a password on this key to protect it well.
 
 ```
-ssh-keygen -t rsa -b 4096 -f id_rsa.ca
+$ ssh-keygen -t rsa -b 4096 -f id_rsa.ca
 ```
 
 Host Key and Certificate
@@ -18,13 +51,13 @@ Host Key and Certificate
 Each server that runs `gatewaysshd` needs a host key and a signed certificate. Suppose the hostname of the server is `gateway-1.example.com`. First, we generate the private key and public key pair:
 
 ```
-ssh-keygen -t rsa -b 2048 -N "" -f id_rsa.gateway-1.example.com
+$ ssh-keygen -t rsa -b 2048 -N "" -f id_rsa.gateway-1.example.com
 ```
 
 Then we will need to sign the public key `id_rsa.gateway-1.example.com.pub` for this host using the certificate authority. If you don't own the certificate authority, you may need to send only this `.pub` file to the certificate authority for them to sign it.
 
 ```
-ssh-keygen -s id_rsa.ca -I gateway-1.example.com -h -n gateway-1.example.com,gateway-1 -V +52w id_rsa.gateway-1.example.com.pub
+$ ssh-keygen -s id_rsa.ca -I gateway-1.example.com -h -n gateway-1.example.com,gateway-1 -V +52w id_rsa.gateway-1.example.com.pub
 ```
 
 * `-s` specifies the path to your certificate authority
@@ -50,11 +83,11 @@ For clients that connects to an instance of `gatewaysshd`, each of them also nee
 * `-n` is also a comma seperated list of principals, but it should be a list of usernames instead of hostnames, the user can only use one of the usernames specified in this list of principals to connect
 
 ```
-ssh-keygen -t rsa -b 2048 -N "" -f id_rsa.john.doe
+$ ssh-keygen -t rsa -b 2048 -N "" -f id_rsa.john.doe
 ```
 
 ```
-ssh-keygen -s id_rsa.ca -I john.doe -n john.doe,john -V +52w id_rsa.john.doe.pub
+$ ssh-keygen -s id_rsa.ca -I john.doe -n john.doe,john -V +52w id_rsa.john.doe.pub
 ```
 
 The output certificate should be named `id_rsa.john.doe-cert.pub`. After the user received the signed certificate back from the authority, they should keep all three files together in their `~/.ssh` folder:
