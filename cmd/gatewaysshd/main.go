@@ -13,7 +13,7 @@ import (
 var (
 	LISTEN           = flag.String("listen", ":2020", "listen endpoint")
 	CA_PUBLIC_KEY    = flag.String("ca-public-key", "id_rsa.ca.pub", "path to certificate authority public key")
-	HOST_CERTIFICATE = flag.String("host-certificate", "id_rsa.host-cert", "path to host certificate")
+	HOST_CERTIFICATE = flag.String("host-certificate", "id_rsa.host-cert.pub", "path to host certificate")
 	HOST_PRIVATE_KEY = flag.String("host-private-key", "id_rsa.host", "path to host private key")
 )
 
