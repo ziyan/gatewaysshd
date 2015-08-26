@@ -73,6 +73,9 @@ func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateK
 			glog.V(9).Infof("auth: unknown authority: %v", key)
 			return false
 		},
+		IsRevoked: func(cert *ssh.Certificate) bool {
+			return false
+		},
 	}
 
 	// test the checker
