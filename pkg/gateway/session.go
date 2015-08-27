@@ -26,7 +26,7 @@ type Session struct {
 	lock       *sync.Mutex
 	active     bool
 	closeOnce  sync.Once
-	created    time.Time
+	timestamp  time.Time
 }
 
 func NewSession(gateway *Gateway, connection *ssh.ServerConn) (*Session, error) {
@@ -41,7 +41,7 @@ func NewSession(gateway *Gateway, connection *ssh.ServerConn) (*Session, error) 
 		services:   make(map[string]map[uint16]bool),
 		lock:       &sync.Mutex{},
 		active:     true,
-		created:    time.Now(),
+		timestamp:  time.Now(),
 	}, nil
 }
 
@@ -70,8 +70,8 @@ func (s *Session) LocalAddr() net.Addr {
 	return s.remoteAddr
 }
 
-func (s *Session) Created() time.Time {
-	return s.created
+func (s *Session) Timestamp() time.Time {
+	return s.timestamp
 }
 
 func (s *Session) AddChannel(c *Channel) {

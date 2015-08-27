@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/json"
 	"io"
 	"io/ioutil"
 	"sync"
@@ -87,7 +88,22 @@ func (c *Channel) HandleRequest(request *ssh.Request) {
 	switch request.Type {
 	case "shell":
 		defer c.Close()
-		c.Session().Gateway().ListSessions(c.channel)
+		sessions := c.Session().Gateway().ListSessions()
+		encoded, err := json.MarshalIndent(sessions, "", "  ")
+		if err != nil {
+			glog.Warningf("failed to marshal list of sessions: %s", err)
+			break
+		}
+
+		if _, err := c.channel.Write(encoded); err != nil {
+			glog.Warningf("failed to send list of sessions: %s", err)
+			break
+		}
+
+		if _, err := c.channel.Write([]byte("\n")); err != nil {
+			glog.Warningf("failed to send list of sessions: %s", err)
+			break
+		}
 	}
 }
 

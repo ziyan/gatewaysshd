@@ -3,10 +3,7 @@ package gateway
 import (
 	"bytes"
 	"errors"
-	"fmt"
-	"io"
 	"net"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -181,19 +178,21 @@ func (g *Gateway) LookupSessionService(host string, port uint16) (*Session, stri
 	return nil, "", 0
 }
 
-func (g *Gateway) ListSessions(w io.Writer) {
+func (g *Gateway) ListSessions() []interface{} {
 	g.lock.Lock()
 	defer g.lock.Unlock()
 
+	list := make([]interface{}, 0, len(g.sessionsList))
 	for _, session := range g.sessionsList {
-		services := make([]string, 0)
-		for host, ports := range session.Services() {
-			for _, port := range ports {
-				services = append(services, fmt.Sprintf("%s:%d", host, port))
-			}
-		}
-		sort.Strings(services)
-
-		fmt.Fprintf(w, "%s\t%v\t%d\t%d\t%s\n", session.User(), session.RemoteAddr(), session.ChannelsCount(), uint64(time.Since(session.Created()).Seconds()), strings.Join(services, ","))
+		list = append(list, map[string]interface{}{
+			"user":           session.User(),
+			"address":        session.RemoteAddr().String(),
+			"channels_count": session.ChannelsCount(),
+			"timestamp":      session.Timestamp().Unix(),
+			"uptime":         uint64(time.Since(session.Timestamp()).Seconds()),
+			"services":       session.Services(),
+		})
 	}
+
+	return list
 }
