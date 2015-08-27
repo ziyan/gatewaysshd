@@ -25,8 +25,31 @@ You can check what sessions are connected on the gateway server:
 
 ```
 $ ssh -T username@gateway
-username	1.2.3.4:44604	0	
-workstation	5.6.7.8:23203	1	ssh:22,web:80
+[
+  {
+    "address": "1.2.3.4:1234",
+    "channels_count": 1,
+    "services": {},
+    "timestamp": 1440668695,
+    "uptime": 0,
+    "user": "username"
+  },
+  {
+    "address": "5.6.7.8:1234",
+    "channels_count": 0,
+    "services": {
+      "ssh": [
+        22
+      ],
+      "web": [
+        80
+      ]
+    },
+    "timestamp": 1440668286,
+    "uptime": 409,
+    "user": "workstation"
+  }
+]
 ```
 
 When you remote forward a local port, `gatewaysshd` does not actually open the port on the server side. The ports you specified is a virtual concept for `gatewaysshd`. It simply keeps track of forwarded ports and internally connect and tunnel the ports when requested by another client. This relieves you the burden of assigning managing ports on the server side.
