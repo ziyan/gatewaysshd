@@ -7,11 +7,11 @@
 	"Deps": [
 		{
 			"ImportPath": "github.com/golang/glog",
-			"Rev": "44145f04b68cf362d9c4df2182967c2275eaefed"
+			"Rev": "23def4e6c14b4da8ac2ed8007337bc5eb5007998"
 		},
 		{
 			"ImportPath": "golang.org/x/crypto/ssh",
-			"Rev": "60052bd85f2d91293457e8811b0cf26b773de469"
+			"Rev": "3760e016850398b85094c4c99e955b8c3dea5711"
 		}
 	]
 }
