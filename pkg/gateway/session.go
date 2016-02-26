@@ -16,32 +16,40 @@ var (
 )
 
 type Session struct {
-	gateway    *Gateway
-	connection *ssh.ServerConn
-	user       string
-	remoteAddr net.Addr
-	localAddr  net.Addr
-	channels   []*Channel
-	services   map[string]map[uint16]bool
-	lock       *sync.Mutex
-	active     bool
-	closeOnce  sync.Once
-	timestamp  time.Time
+	gateway        *Gateway
+	connection     *ssh.ServerConn
+	user           string
+	remoteAddr     net.Addr
+	localAddr      net.Addr
+	channels       []*Channel
+	channelsClosed uint64
+	services       map[string]map[uint16]bool
+	lock           *sync.Mutex
+	active         bool
+	closeOnce      sync.Once
+	created        time.Time
+	used           time.Time
+	bytesRead      uint64
+	bytesWritten   uint64
 }
 
 func NewSession(gateway *Gateway, connection *ssh.ServerConn) (*Session, error) {
 	glog.V(1).Infof("new session: user = %s, remote = %v", connection.User(), connection.RemoteAddr())
 
 	return &Session{
-		gateway:    gateway,
-		connection: connection,
-		user:       connection.User(),
-		remoteAddr: connection.RemoteAddr(),
-		localAddr:  connection.LocalAddr(),
-		services:   make(map[string]map[uint16]bool),
-		lock:       &sync.Mutex{},
-		active:     true,
-		timestamp:  time.Now(),
+		gateway:        gateway,
+		connection:     connection,
+		user:           connection.User(),
+		remoteAddr:     connection.RemoteAddr(),
+		localAddr:      connection.LocalAddr(),
+		services:       make(map[string]map[uint16]bool),
+		lock:           &sync.Mutex{},
+		active:         true,
+		created:        time.Now(),
+		used:           time.Now(),
+		channelsClosed: 0,
+		bytesRead:      0,
+		bytesWritten:   0,
 	}, nil
 }
 
@@ -49,6 +57,14 @@ func (s *Session) Close() {
 	s.closeOnce.Do(func() {
 		s.active = false
 		s.Gateway().DeleteSession(s)
+
+		for _, channel := range s.Channels() {
+			channel.Close()
+		}
+
+		if err := s.connection.Close(); err != nil {
+			glog.Warningf("failed to close session: %s", err)
+		}
 
 		glog.V(1).Infof("session closed: user = %s, remote = %v", s.User(), s.RemoteAddr())
 	})
@@ -70,8 +86,51 @@ func (s *Session) LocalAddr() net.Addr {
 	return s.remoteAddr
 }
 
-func (s *Session) Timestamp() time.Time {
-	return s.timestamp
+func (s *Session) Created() time.Time {
+	return s.created
+}
+
+func (s *Session) Used() time.Time {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	used := s.used
+	for _, channel := range s.channels {
+		u := channel.Used()
+		if u.After(used) {
+			used = u
+		}
+	}
+	return used
+}
+
+func (s *Session) BytesRead() uint64 {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	bytesRead := s.bytesRead
+	for _, channel := range s.channels {
+		bytesRead += channel.BytesRead()
+	}
+	return bytesRead
+}
+
+func (s *Session) BytesWritten() uint64 {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	bytesWritten := s.bytesWritten
+	for _, channel := range s.channels {
+		bytesWritten += channel.BytesWritten()
+	}
+	return bytesWritten
+}
+
+func (s *Session) ChannelsClosed() uint64 {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	return s.channelsClosed
 }
 
 func (s *Session) AddChannel(c *Channel) {
@@ -93,6 +152,27 @@ func (s *Session) DeleteChannel(c *Channel) {
 		}
 	}
 	s.channels = channels
+
+	// keep used time
+	used := c.Used()
+	if used.After(s.used) {
+		s.used = used
+	}
+
+	// keep stats
+	s.bytesRead += c.BytesRead()
+	s.bytesWritten += c.BytesWritten()
+
+	s.channelsClosed += 1
+}
+
+func (s *Session) Channels() []*Channel {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	channels := make([]*Channel, len(s.channels))
+	copy(channels, s.channels)
+	return channels
 }
 
 func (s *Session) ChannelsCount() int {
@@ -116,6 +196,48 @@ func (s *Session) Services() map[string][]uint16 {
 	}
 
 	return services
+}
+
+func (s *Session) Status() map[string]interface{} {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	// stats
+	bytesRead := s.bytesRead
+	bytesWritten := s.bytesWritten
+	used := s.used
+	for _, channel := range s.channels {
+		bytesRead += channel.BytesRead()
+		bytesWritten += channel.BytesWritten()
+		u := channel.Used()
+		if u.After(used) {
+			used = u
+		}
+	}
+
+	// services
+	services := make(map[string][]uint16)
+	for host, ports := range s.services {
+		for port, ok := range ports {
+			if ok {
+				services[host] = append(services[host], port)
+			}
+		}
+	}
+
+	return map[string]interface{}{
+		"user":            s.user,
+		"address":         s.remoteAddr.String(),
+		"channels_count":  len(s.channels),
+		"channels_closed": s.channelsClosed,
+		"created":         s.created.Unix(),
+		"used":            used.Unix(),
+		"uptime":          uint64(time.Since(s.created).Seconds()),
+		"idletime":        uint64(time.Since(used).Seconds()),
+		"bytes_read":      bytesRead,
+		"bytes_written":   bytesWritten,
+		"services":        services,
+	}
 }
 
 func (s *Session) LookupService(host string, port uint16) bool {
@@ -161,6 +283,7 @@ func (s *Session) HandleRequests(requests <-chan *ssh.Request) {
 	defer s.Close()
 
 	for request := range requests {
+		s.used = time.Now()
 		go s.HandleRequest(request)
 	}
 }
@@ -169,6 +292,7 @@ func (s *Session) HandleChannels(channels <-chan ssh.NewChannel) {
 	defer s.Close()
 
 	for channel := range channels {
+		s.used = time.Now()
 		go s.HandleChannel(channel)
 	}
 }

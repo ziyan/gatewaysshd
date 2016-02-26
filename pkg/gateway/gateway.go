@@ -21,6 +21,7 @@ type Gateway struct {
 	sessionsIndex map[string][]*Session
 	sessionsList  []*Session
 	lock          *sync.Mutex
+	closeOnce     sync.Once
 }
 
 func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateKey []byte) (*Gateway, error) {
@@ -102,6 +103,14 @@ func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateK
 	}, nil
 }
 
+func (g *Gateway) Close() {
+	g.closeOnce.Do(func() {
+		for _, session := range g.Sessions() {
+			session.Close()
+		}
+	})
+}
+
 func (g *Gateway) HandleConnection(c net.Conn) {
 	glog.V(1).Infof("new tcp connection: remote = %s, local = %s", c.RemoteAddr(), c.LocalAddr())
 
@@ -178,21 +187,35 @@ func (g *Gateway) LookupSessionService(host string, port uint16) (*Session, stri
 	return nil, "", 0
 }
 
-func (g *Gateway) ListSessions() []interface{} {
+func (g *Gateway) Sessions() []*Session {
 	g.lock.Lock()
 	defer g.lock.Unlock()
 
-	list := make([]interface{}, 0, len(g.sessionsList))
+	sessions := make([]*Session, len(g.sessionsList))
+	copy(sessions, g.sessionsList)
+	return sessions
+}
+
+func (g *Gateway) ScavengeSessions(timeout time.Duration) {
+	for _, session := range g.Sessions() {
+		idle := time.Since(session.Used())
+		if idle > timeout {
+			glog.V(1).Infof("scavenge: session for %s timed out after %d seconds", session.User(), uint64(idle.Seconds()))
+			session.Close()
+		}
+	}
+}
+
+func (g *Gateway) Status() map[string]interface{} {
+	g.lock.Lock()
+	defer g.lock.Unlock()
+
+	sessions := make([]interface{}, 0, len(g.sessionsList))
 	for _, session := range g.sessionsList {
-		list = append(list, map[string]interface{}{
-			"user":           session.User(),
-			"address":        session.RemoteAddr().String(),
-			"channels_count": session.ChannelsCount(),
-			"timestamp":      session.Timestamp().Unix(),
-			"uptime":         uint64(time.Since(session.Timestamp()).Seconds()),
-			"services":       session.Services(),
-		})
+		sessions = append(sessions, session.Status())
 	}
 
-	return list
+	return map[string]interface{}{
+		"sesions": sessions,
+	}
 }

@@ -12,23 +12,29 @@ import (
 )
 
 type Channel struct {
-	session     *Session
-	channel     ssh.Channel
-	channelType string
-	extraData   []byte
-	active      bool
-	closeOnce   sync.Once
-	created     time.Time
+	session      *Session
+	channel      ssh.Channel
+	channelType  string
+	extraData    []byte
+	active       bool
+	closeOnce    sync.Once
+	created      time.Time
+	used         time.Time
+	bytesRead    uint64
+	bytesWritten uint64
 }
 
 func NewChannel(session *Session, channel ssh.Channel, channelType string, extraData []byte) (*Channel, error) {
 	glog.V(1).Infof("new channel: user = %s, remote = %v, type = %s", session.User(), session.RemoteAddr(), channelType)
 	return &Channel{
-		session:     session,
-		channel:     channel,
-		channelType: channelType,
-		extraData:   extraData,
-		created:     time.Now(),
+		session:      session,
+		channel:      channel,
+		channelType:  channelType,
+		extraData:    extraData,
+		created:      time.Now(),
+		used:         time.Now(),
+		bytesRead:    0,
+		bytesWritten: 0,
 	}, nil
 }
 
@@ -36,9 +42,11 @@ func (c *Channel) Close() {
 	c.closeOnce.Do(func() {
 		c.active = false
 		c.Session().DeleteChannel(c)
+
 		if err := c.channel.Close(); err != nil {
 			glog.Warningf("failed to close channel: %s", err)
 		}
+
 		glog.V(1).Infof("channel closed: user = %s, remote = %v, type = %s", c.Session().User(), c.Session().RemoteAddr(), c.channelType)
 	})
 }
@@ -51,10 +59,23 @@ func (c *Channel) Created() time.Time {
 	return c.created
 }
 
+func (c *Channel) Used() time.Time {
+	return c.used
+}
+
+func (c *Channel) BytesRead() uint64 {
+	return c.bytesRead
+}
+
+func (c *Channel) BytesWritten() uint64 {
+	return c.bytesWritten
+}
+
 func (c *Channel) HandleRequests(requests <-chan *ssh.Request) {
 	defer c.Close()
 
 	for request := range requests {
+		c.used = time.Now()
 		go c.HandleRequest(request)
 	}
 }
@@ -88,20 +109,20 @@ func (c *Channel) HandleRequest(request *ssh.Request) {
 	switch request.Type {
 	case "shell":
 		defer c.Close()
-		sessions := c.Session().Gateway().ListSessions()
-		encoded, err := json.MarshalIndent(sessions, "", "  ")
+		status := c.Session().Gateway().Status()
+		encoded, err := json.MarshalIndent(status, "", "  ")
 		if err != nil {
-			glog.Warningf("failed to marshal list of sessions: %s", err)
+			glog.Warningf("failed to marshal status: %s", err)
 			break
 		}
 
-		if _, err := c.channel.Write(encoded); err != nil {
-			glog.Warningf("failed to send list of sessions: %s", err)
+		if _, err := c.Write(encoded); err != nil {
+			glog.Warningf("failed to send status: %s", err)
 			break
 		}
 
-		if _, err := c.channel.Write([]byte("\n")); err != nil {
-			glog.Warningf("failed to send list of sessions: %s", err)
+		if _, err := c.Write([]byte("\n")); err != nil {
+			glog.Warningf("failed to send status: %s", err)
 			break
 		}
 	}
@@ -113,18 +134,34 @@ func (c *Channel) HandleTunnelChannel(c2 *Channel) {
 	go func() {
 		defer c2.Close()
 		defer c.Close()
-		io.Copy(c.channel, c2.channel)
+		io.Copy(c, c2)
 	}()
 
 	go func() {
 		defer c2.Close()
 		defer c.Close()
-		io.Copy(c2.channel, c.channel)
+		io.Copy(c2, c)
 	}()
 }
 
 func (c *Channel) HandleSessionChannel() {
 	defer c.Close()
 
-	io.Copy(ioutil.Discard, c.channel)
+	io.Copy(ioutil.Discard, c)
+}
+
+func (c *Channel) Read(data []byte) (int, error) {
+	size, err := c.channel.Read(data)
+	c.bytesRead += uint64(size)
+	c.used = time.Now()
+	glog.V(9).Infof("read: size = %d", size)
+	return size, err
+}
+
+func (c *Channel) Write(data []byte) (int, error) {
+	size, err := c.channel.Write(data)
+	c.bytesWritten += uint64(size)
+	c.used = time.Now()
+	glog.V(9).Infof("write: size = %d", size)
+	return size, err
 }
