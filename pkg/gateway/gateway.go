@@ -216,6 +216,6 @@ func (g *Gateway) Status() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"sesions": sessions,
+		"sessions": sessions,
 	}
 }
