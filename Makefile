@@ -5,7 +5,7 @@ all: build
 build: gatewaysshd
 
 gatewaysshd: $(shell find . -iname '*.go' -print)
-	godep go build github.com/ziyan/gatewaysshd/cmd/gatewaysshd
+	CGO_ENABLED=0 godep go build github.com/ziyan/gatewaysshd/cmd/gatewaysshd
 
 .PHONY: test
 test: build

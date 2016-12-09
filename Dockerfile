@@ -1,10 +1,9 @@
-FROM debian:wheezy
+FROM busybox
 
-WORKDIR /data
-ENTRYPOINT ["/opt/bin/gatewaysshd"]
-ADD gatewaysshd /opt/bin/gatewaysshd
+ADD gatewaysshd /bin/gatewaysshd
+ENTRYPOINT ["/bin/gatewaysshd"]
 
-ONBUILD ADD id_rsa.ca.pub id_rsa.host-cert.pub id_rsa.host /data/
-ONBUILD RUN chown -R root:root /data && chmod -R a+r /data
+ONBUILD ADD id_rsa.ca.pub id_rsa.host-cert.pub id_rsa.host /
+ONBUILD RUN chmod -R a+r id_rsa.ca.pub id_rsa.host-cert.pub id_rsa.host
 ONBUILD USER nobody
 
