@@ -1,6 +1,7 @@
 {
 	"ImportPath": "github.com/ziyan/gatewaysshd",
-	"GoVersion": "go1.6",
+	"GoVersion": "go1.8",
+	"GodepVersion": "v79",
 	"Packages": [
 		"./..."
 	],
