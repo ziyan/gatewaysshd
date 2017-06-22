@@ -30,85 +30,85 @@ func Run(args []string) {
 
 	app := cli.NewApp()
 	app.EnableBashCompletion = true
-	app.Name = "SSH Gateway"
+	app.Name = "gatewaysshd"
 	app.Version = "0.1.0"
-	app.Usage = "SSH Gateway"
+	app.Usage = "A daemon that provides a meeting place for all your SSH tunnels."
 
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
-			Name:   "loglevel",
+			Name:   "log-level",
 			Value:  "INFO",
-			Usage:  "Log level",
+			Usage:  "log level",
 			EnvVar: "GATEWAYSSHD_LOG_LEVEL",
 		},
 		cli.StringFlag{
-			Name:   "logformat",
+			Name:   "log-format",
 			Value:  "%{color}%{time:2006-01-02T15:04:05.000Z07:00} [%{level:.4s}] [%{shortfile} %{shortfunc}] %{message}%{color:reset}",
-			Usage:  "Log format",
+			Usage:  "log format",
 			EnvVar: "GATEWAYSSHD_LOG_LEVEL",
 		},
 		cli.StringFlag{
 			Name:   "listen",
 			Value:  ":2020",
-			Usage:  "Listen endpoint",
+			Usage:  "listen endpoint",
 			EnvVar: "GATEWAYSSHD_LISTEN",
 		},
 		cli.StringFlag{
-			Name:   "ca",
+			Name:   "ca-public-key",
 			Value:  "id_rsa.ca.pub",
-			Usage:  "Path to certificate authority public key",
+			Usage:  "path to certificate authority public key",
 			EnvVar: "GATEWAYSSHD_CA_PUBLIC_KEY",
 		},
 		cli.StringFlag{
-			Name:   "cert",
+			Name:   "host-certificate",
 			Value:  "id_rsa.host-cert.pub",
-			Usage:  "Path to host certificate",
+			Usage:  "path to host certificate",
 			EnvVar: "GATEWAYSSHD_HOST_CERTIFICATE",
 		},
 		cli.StringFlag{
-			Name:   "key",
+			Name:   "host-private-key",
 			Value:  "id_rsa.host",
-			Usage:  "Path to host private key",
+			Usage:  "path to host private key",
 			EnvVar: "GATEWAYSSHD_HOST_PRIVATE_KEY",
 		},
 		cli.StringFlag{
-			Name:   "serverversion",
+			Name:   "server-version",
 			Value:  "SSH-2.0-gatewaysshd",
-			Usage:  "Server version string",
+			Usage:  "server version string",
 			EnvVar: "GATEWAYSSHD_SERVER_VERSION",
 		},
 		cli.IntFlag{
-			Name:   "idletimeout",
+			Name:   "idle-timeout",
 			Value:  600,
-			Usage:  "Idle timeout in seconds",
+			Usage:  "idle timeout in seconds",
 			EnvVar: "GATEWAYSSHD_IDLE_TIMEOUT",
 		},
 	}
 
 	app.Action = func(c *cli.Context) error {
-		configureLogging(c.String("loglevel"), c.String("logformat"))
+		configureLogging(c.String("log-level"), c.String("log-format"))
 
 		// get the keys
-		caPublicKey, err := ioutil.ReadFile(c.String("ca"))
+		caPublicKey, err := ioutil.ReadFile(c.String("ca-public-key"))
 		if err != nil {
 			log.Errorf("failed to load certificate authority public key from file \"%s\": %s", c.String("ca"), err)
 			return err
 		}
 
-		hostCertificate, err := ioutil.ReadFile(c.String("cert"))
+		hostCertificate, err := ioutil.ReadFile(c.String("host-cert"))
 		if err != nil {
 			log.Errorf("failed to load host certificate from file \"%s\": %s", c.String("cert"), err)
 			return err
 		}
 
-		hostPrivateKey, err := ioutil.ReadFile(c.String("key"))
+		hostPrivateKey, err := ioutil.ReadFile(c.String("host-private-key"))
 		if err != nil {
 			log.Errorf("failed to load host private key from file \"%s\": %s", c.String("key"), err)
 			return err
 		}
 
 		// create gateway
-		gateway, err := gateway.NewGateway(c.String("serverversion"), caPublicKey, hostCertificate, hostPrivateKey)
+		gateway, err := gateway.NewGateway(c.String("server-version"), caPublicKey, hostCertificate, hostPrivateKey)
 		if err != nil {
 			log.Errorf("failed to create ssh gateway: %s", err)
 			return err
@@ -150,7 +150,7 @@ func Run(args []string) {
 			case <-signaling:
 				quit = true
 			case <-time.After(30 * time.Second):
-				gateway.ScavengeSessions(time.Duration(c.Int("idletimeout")) * time.Second)
+				gateway.ScavengeSessions(time.Duration(c.Int("idle-timeout")) * time.Second)
 			}
 		}
 
