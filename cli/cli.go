@@ -45,7 +45,7 @@ func Run(args []string) {
 			Name:   "log-format",
 			Value:  "%{color}%{time:2006-01-02T15:04:05.000Z07:00} [%{level:.4s}] [%{shortfile} %{shortfunc}] %{message}%{color:reset}",
 			Usage:  "log format",
-			EnvVar: "GATEWAYSSHD_LOG_LEVEL",
+			EnvVar: "GATEWAYSSHD_LOG_FORMAT",
 		},
 		cli.StringFlag{
 			Name:   "listen",
