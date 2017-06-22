@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/glog"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -34,7 +33,7 @@ type Session struct {
 }
 
 func NewSession(gateway *Gateway, connection *ssh.ServerConn) (*Session, error) {
-	glog.V(1).Infof("new session: user = %s, remote = %v", connection.User(), connection.RemoteAddr())
+	log.Infof("new session: user = %s, remote = %v", connection.User(), connection.RemoteAddr())
 
 	return &Session{
 		gateway:        gateway,
@@ -63,10 +62,10 @@ func (s *Session) Close() {
 		}
 
 		if err := s.connection.Close(); err != nil {
-			glog.Warningf("failed to close session: %s", err)
+			log.Debugf("failed to close session: %s", err)
 		}
 
-		glog.V(1).Infof("session closed: user = %s, remote = %v", s.User(), s.RemoteAddr())
+		log.Infof("session closed: user = %s, remote = %v, status = %v", s.User(), s.RemoteAddr(), s.Status())
 	})
 }
 
@@ -263,7 +262,7 @@ func (s *Session) RegisterService(host string, port uint16) error {
 	}
 	s.services[host][port] = true
 
-	glog.V(1).Infof("registered service: user = %s, host = %s, port = %d", s.user, host, port)
+	log.Infof("registered service: user = %s, host = %s, port = %d", s.user, host, port)
 	return nil
 }
 
@@ -275,7 +274,7 @@ func (s *Session) DeregisterService(host string, port uint16) error {
 		delete(s.services[host], port)
 	}
 
-	glog.V(1).Infof("deregistered service: user = %s, host = %s, port = %d", s.user, host, port)
+	log.Infof("deregistered service: user = %s, host = %s, port = %d", s.user, host, port)
 	return nil
 }
 
@@ -298,24 +297,24 @@ func (s *Session) HandleChannels(channels <-chan ssh.NewChannel) {
 }
 
 func (s *Session) HandleRequest(request *ssh.Request) {
-	glog.V(9).Infof("request received: type = %s, want_reply = %v, payload = %v", request.Type, request.WantReply, request.Payload)
+	log.Debugf("request received: type = %s, want_reply = %v, payload = %v", request.Type, request.WantReply, request.Payload)
 
 	ok := false
 	switch request.Type {
 	case "tcpip-forward":
 		request, err := UnmarshalForwardRequest(request.Payload)
 		if err != nil {
-			glog.Errorf("failed to decode request: %s", err)
+			log.Errorf("failed to decode request: %s", err)
 			break
 		}
 
 		if request.Port == 0 {
-			glog.Errorf("requested forwarding port is not allowed: %d", request.Port)
+			log.Errorf("requested forwarding port is not allowed: %d", request.Port)
 			break
 		}
 
 		if err := s.RegisterService(request.Host, uint16(request.Port)); err != nil {
-			glog.Errorf("failed to register service in session: %s", err)
+			log.Errorf("failed to register service in session: %s", err)
 			break
 		}
 
@@ -324,12 +323,12 @@ func (s *Session) HandleRequest(request *ssh.Request) {
 	case "cancel-tcpip-forward":
 		request, err := UnmarshalForwardRequest(request.Payload)
 		if err != nil {
-			glog.Errorf("failed to decode request: %s", err)
+			log.Errorf("failed to decode request: %s", err)
 			break
 		}
 
 		if err := s.DeregisterService(request.Host, uint16(request.Port)); err != nil {
-			glog.Errorf("failed to register service in session: %s", err)
+			log.Errorf("failed to register service in session: %s", err)
 			break
 		}
 
@@ -339,13 +338,13 @@ func (s *Session) HandleRequest(request *ssh.Request) {
 
 	if request.WantReply {
 		if err := request.Reply(ok, nil); err != nil {
-			glog.Warningf("failed to reply to request: %s", err)
+			log.Warningf("failed to reply to request: %s", err)
 		}
 	}
 }
 
 func (s *Session) HandleChannel(newChannel ssh.NewChannel) {
-	glog.V(9).Infof("new channel: type = %s, data = %v", newChannel.ChannelType(), newChannel.ExtraData())
+	log.Debugf("new channel: type = %s, data = %v", newChannel.ChannelType(), newChannel.ExtraData())
 
 	ok := false
 	rejection := ssh.UnknownChannelType
@@ -360,7 +359,7 @@ func (s *Session) HandleChannel(newChannel ssh.NewChannel) {
 	if !ok {
 		// reject the channel
 		if err := newChannel.Reject(rejection, ""); err != nil {
-			glog.Warningf("failed to reject channel: %s", err)
+			log.Warningf("failed to reject channel: %s", err)
 		}
 	}
 }
@@ -382,14 +381,14 @@ func (s *Session) HandleSessionChannel(newChannel ssh.NewChannel) (bool, ssh.Rej
 	defer func() {
 		if channel != nil {
 			if err := channel.Close(); err != nil {
-				glog.Warningf("failed to close accepted channel: %s", err)
+				log.Warningf("failed to close accepted channel: %s", err)
 			}
 		}
 	}()
 
 	c, err := NewChannel(s, channel, newChannel.ChannelType(), newChannel.ExtraData())
 	if err != nil {
-		glog.Errorf("failed to create accepted channel: %s", err)
+		log.Errorf("failed to create accepted channel: %s", err)
 		return true, 0
 	}
 	s.AddChannel(c)
@@ -437,18 +436,18 @@ func (s *Session) HandleDirectChannel(newChannel ssh.NewChannel) (bool, ssh.Reje
 	}
 
 	// cannot return false from this point on
-	// also need to accepted close the channel
+	// also need to close the accepted channel
 	defer func() {
 		if channel != nil {
 			if err := channel.Close(); err != nil {
-				glog.Warningf("failed to close accepted channel: %s", err)
+				log.Warningf("failed to close accepted channel: %s", err)
 			}
 		}
 	}()
 
 	c, err := NewChannel(s, channel, newChannel.ChannelType(), newChannel.ExtraData())
 	if err != nil {
-		glog.Errorf("failed to create accepted channel: %s", err)
+		log.Errorf("failed to create accepted channel: %s", err)
 		return true, 0
 	}
 	s.AddChannel(c)
@@ -465,7 +464,7 @@ func (s *Session) HandleDirectChannel(newChannel ssh.NewChannel) (bool, ssh.Reje
 
 // open a channel from the server to the client side
 func (s *Session) OpenChannel(channelType string, extraData []byte) (*Channel, error) {
-	glog.V(9).Infof("opening channel: type = %s, data = %v", channelType, extraData)
+	log.Debugf("opening channel: type = %s, data = %v", channelType, extraData)
 
 	channel, requests, err := s.connection.OpenChannel(channelType, extraData)
 	if err != nil {
@@ -474,7 +473,7 @@ func (s *Session) OpenChannel(channelType string, extraData []byte) (*Channel, e
 	defer func() {
 		if channel != nil {
 			if err := channel.Close(); err != nil {
-				glog.Warningf("failed to close opened channel: %s", err)
+				log.Warningf("failed to close opened channel: %s", err)
 			}
 		}
 	}()

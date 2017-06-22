@@ -5,7 +5,7 @@ all: build
 build: gatewaysshd
 
 gatewaysshd: $(shell find . -iname '*.go' -print)
-	CGO_ENABLED=0 godep go build github.com/ziyan/gatewaysshd/cmd/gatewaysshd
+	CGO_ENABLED=0 godep go build github.com/ziyan/gatewaysshd
 
 .PHONY: test
 test: build
@@ -21,5 +21,5 @@ save:
 
 .PHONY: format
 format:
-	gofmt -l -w cmd pkg
+	gofmt -l -w gateway cli
 

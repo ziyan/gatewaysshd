@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/glog"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -25,7 +24,7 @@ type Channel struct {
 }
 
 func NewChannel(session *Session, channel ssh.Channel, channelType string, extraData []byte) (*Channel, error) {
-	glog.V(1).Infof("new channel: user = %s, remote = %v, type = %s", session.User(), session.RemoteAddr(), channelType)
+	log.Infof("new channel: user = %s, remote = %v, type = %s", session.User(), session.RemoteAddr(), channelType)
 	return &Channel{
 		session:      session,
 		channel:      channel,
@@ -44,10 +43,10 @@ func (c *Channel) Close() {
 		c.Session().DeleteChannel(c)
 
 		if err := c.channel.Close(); err != nil {
-			glog.Warningf("failed to close channel: %s", err)
+			log.Warningf("failed to close channel: %s", err)
 		}
 
-		glog.V(1).Infof("channel closed: user = %s, remote = %v, type = %s", c.Session().User(), c.Session().RemoteAddr(), c.channelType)
+		log.Infof("channel closed: user = %s, remote = %v, type = %s", c.Session().User(), c.Session().RemoteAddr(), c.channelType)
 	})
 }
 
@@ -81,7 +80,7 @@ func (c *Channel) HandleRequests(requests <-chan *ssh.Request) {
 }
 
 func (c *Channel) HandleRequest(request *ssh.Request) {
-	glog.V(9).Infof("request received: type = %s, want_reply = %v, payload = %v", request.Type, request.WantReply, request.Payload)
+	log.Debugf("request received: type = %s, want_reply = %v, payload = %v", request.Type, request.WantReply, request.Payload)
 
 	// check parameters
 	ok := false
@@ -101,7 +100,7 @@ func (c *Channel) HandleRequest(request *ssh.Request) {
 	// reply to client
 	if request.WantReply {
 		if err := request.Reply(ok, nil); err != nil {
-			glog.Warningf("failed to reply to request: %s", err)
+			log.Warningf("failed to reply to request: %s", err)
 		}
 	}
 
@@ -112,17 +111,17 @@ func (c *Channel) HandleRequest(request *ssh.Request) {
 		status := c.Session().Gateway().Status()
 		encoded, err := json.MarshalIndent(status, "", "  ")
 		if err != nil {
-			glog.Warningf("failed to marshal status: %s", err)
+			log.Warningf("failed to marshal status: %s", err)
 			break
 		}
 
 		if _, err := c.Write(encoded); err != nil {
-			glog.Warningf("failed to send status: %s", err)
+			log.Warningf("failed to send status: %s", err)
 			break
 		}
 
 		if _, err := c.Write([]byte("\n")); err != nil {
-			glog.Warningf("failed to send status: %s", err)
+			log.Warningf("failed to send status: %s", err)
 			break
 		}
 	}
@@ -154,7 +153,7 @@ func (c *Channel) Read(data []byte) (int, error) {
 	size, err := c.channel.Read(data)
 	c.bytesRead += uint64(size)
 	c.used = time.Now()
-	glog.V(9).Infof("read: size = %d", size)
+	log.Debugf("read: size = %d", size)
 	return size, err
 }
 
@@ -162,6 +161,6 @@ func (c *Channel) Write(data []byte) (int, error) {
 	size, err := c.channel.Write(data)
 	c.bytesWritten += uint64(size)
 	c.used = time.Now()
-	glog.V(9).Infof("write: size = %d", size)
+	log.Debugf("write: size = %d", size)
 	return size, err
 }

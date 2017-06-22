@@ -8,9 +8,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/glog"
+	"github.com/op/go-logging"
 	"golang.org/x/crypto/ssh"
 )
+
+var log = logging.MustGetLogger("gateway")
 
 var (
 	ErrInvalidCertificate = errors.New("gatewaysshd: invalid certificate")
@@ -31,7 +33,7 @@ func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateK
 	if err != nil {
 		return nil, err
 	}
-	glog.V(9).Infof("auth: ca_public_key = %v", ca)
+	log.Debugf("auth: ca_public_key = %v", ca)
 
 	// parse host certificate
 	parsed, _, _, _, err := ssh.ParseAuthorizedKey(hostCertificate)
@@ -59,7 +61,7 @@ func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateK
 	if err != nil {
 		return nil, err
 	}
-	glog.V(9).Infof("auth: host_public_key = %v", key.PublicKey())
+	log.Debugf("auth: host_public_key = %v", key.PublicKey())
 
 	// create checker
 	// TODO: implement IsRevoked
@@ -68,7 +70,7 @@ func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateK
 			if bytes.Compare(ca.Marshal(), key.Marshal()) == 0 {
 				return true
 			}
-			glog.V(9).Infof("auth: unknown authority: %v", key)
+			log.Debugf("auth: unknown authority: %v", key)
 			return false
 		},
 		IsRevoked: func(cert *ssh.Certificate) bool {
@@ -77,7 +79,7 @@ func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateK
 	}
 
 	// test the checker
-	glog.V(9).Infof("auth: testing host certificate using principal: %s", principal)
+	log.Debugf("auth: testing host certificate using principal: %s", principal)
 	if err := checker.CheckCert(principal, cert); err != nil {
 		return nil, err
 	}
@@ -85,11 +87,12 @@ func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateK
 	// create server config
 	config := &ssh.ServerConfig{
 		PublicKeyCallback: func(meta ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
-			glog.V(9).Infof("auth: remote = %s, local = %s, public_key = %v", meta.RemoteAddr(), meta.LocalAddr(), key)
-			return checker.Authenticate(meta, key)
+			permissions, err := checker.Authenticate(meta, key)
+			log.Debugf("auth: remote = %s, local = %s, public_key = %v, permissions = %v, err = %v", meta.RemoteAddr(), meta.LocalAddr(), key, permissions, err)
+			return permissions, err
 		},
 		AuthLogCallback: func(meta ssh.ConnMetadata, method string, err error) {
-			glog.V(2).Infof("auth: remote = %s, local = %s, method = %s, error = %v", meta.RemoteAddr(), meta.LocalAddr(), method, err)
+			log.Debugf("auth: remote = %s, local = %s, method = %s, error = %v", meta.RemoteAddr(), meta.LocalAddr(), method, err)
 		},
 		ServerVersion: serverVersion,
 	}
@@ -112,20 +115,20 @@ func (g *Gateway) Close() {
 }
 
 func (g *Gateway) HandleConnection(c net.Conn) {
-	glog.V(1).Infof("new tcp connection: remote = %s, local = %s", c.RemoteAddr(), c.LocalAddr())
+	log.Debugf("new tcp connection: remote = %s, local = %s", c.RemoteAddr(), c.LocalAddr())
 
 	connection, channels, requests, err := ssh.NewServerConn(c, g.config)
 	if err != nil {
-		glog.Warningf("failed during ssh handshake: %s", err)
+		log.Warningf("failed during ssh handshake: %s", err)
 		return
 	}
 
 	// create a session and handle it
 	session, err := NewSession(g, connection)
 	if err != nil {
-		glog.Errorf("failed to create session: %s", err)
+		log.Errorf("failed to create session: %s", err)
 		if err := connection.Close(); err != nil {
-			glog.Warningf("failed to close connection: %s", err)
+			log.Warningf("failed to close connection: %s", err)
 		}
 		return
 	}
@@ -177,13 +180,13 @@ func (g *Gateway) LookupSessionService(host string, port uint16) (*Session, stri
 
 		for _, session := range g.sessionsIndex[user] {
 			if session.LookupService(host, port) {
-				glog.V(1).Infof("lookup: found service: user = %s, host = %s, port = %d", user, host, port)
+				log.Infof("lookup: found service: user = %s, host = %s, port = %d", user, host, port)
 				return session, host, port
 			}
 		}
 	}
 
-	glog.V(1).Infof("lookup: failed to find service: host = %s, port = %d", host, port)
+	log.Infof("lookup: failed to find service: host = %s, port = %d", host, port)
 	return nil, "", 0
 }
 
@@ -200,7 +203,7 @@ func (g *Gateway) ScavengeSessions(timeout time.Duration) {
 	for _, session := range g.Sessions() {
 		idle := time.Since(session.Used())
 		if idle > timeout {
-			glog.V(1).Infof("scavenge: session for %s timed out after %d seconds", session.User(), uint64(idle.Seconds()))
+			log.Infof("scavenge: session for %s timed out after %d seconds", session.User(), uint64(idle.Seconds()))
 			session.Close()
 		}
 	}
