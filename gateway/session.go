@@ -415,6 +415,8 @@ func (s *Session) HandleDirectChannel(newChannel ssh.NewChannel) (bool, ssh.Reje
 		return false, ssh.ConnectionFailed
 	}
 
+	// TODO: see if this connection is allowed
+
 	// found the service, attempt to open a channel
 	data.Host = host
 	data.Port = uint32(port)

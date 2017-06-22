@@ -91,19 +91,19 @@ func Run(args []string) {
 		// get the keys
 		caPublicKey, err := ioutil.ReadFile(c.String("ca-public-key"))
 		if err != nil {
-			log.Errorf("failed to load certificate authority public key from file \"%s\": %s", c.String("ca"), err)
+			log.Errorf("failed to load certificate authority public key from file \"%s\": %s", c.String("ca-public-key"), err)
 			return err
 		}
 
-		hostCertificate, err := ioutil.ReadFile(c.String("host-cert"))
+		hostCertificate, err := ioutil.ReadFile(c.String("host-certificate"))
 		if err != nil {
-			log.Errorf("failed to load host certificate from file \"%s\": %s", c.String("cert"), err)
+			log.Errorf("failed to load host certificate from file \"%s\": %s", c.String("certificate"), err)
 			return err
 		}
 
 		hostPrivateKey, err := ioutil.ReadFile(c.String("host-private-key"))
 		if err != nil {
-			log.Errorf("failed to load host private key from file \"%s\": %s", c.String("key"), err)
+			log.Errorf("failed to load host private key from file \"%s\": %s", c.String("host-private-key"), err)
 			return err
 		}
 
