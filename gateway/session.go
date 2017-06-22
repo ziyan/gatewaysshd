@@ -415,7 +415,11 @@ func (s *Session) HandleDirectChannel(newChannel ssh.NewChannel) (bool, ssh.Reje
 		return false, ssh.ConnectionFailed
 	}
 
-	// TODO: see if this connection is allowed
+	// see if this connection is allowed
+	if _, ok := s.connection.Permissions.Extensions["permit-port-forwarding"]; !ok {
+		log.Warningf("refused to port forward: user = %s", s.user)
+		return false, ssh.Prohibited
+	}
 
 	// found the service, attempt to open a channel
 	data.Host = host
