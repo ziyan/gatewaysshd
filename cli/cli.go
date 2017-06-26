@@ -39,49 +39,41 @@ func Run(args []string) {
 			Name:   "log-level",
 			Value:  "INFO",
 			Usage:  "log level",
-			EnvVar: "GATEWAYSSHD_LOG_LEVEL",
 		},
 		cli.StringFlag{
 			Name:   "log-format",
 			Value:  "%{color}%{time:2006-01-02T15:04:05.000Z07:00} [%{level:.4s}] [%{shortfile} %{shortfunc}] %{message}%{color:reset}",
 			Usage:  "log format",
-			EnvVar: "GATEWAYSSHD_LOG_FORMAT",
 		},
 		cli.StringFlag{
 			Name:   "listen",
 			Value:  ":2020",
 			Usage:  "listen endpoint",
-			EnvVar: "GATEWAYSSHD_LISTEN",
 		},
 		cli.StringFlag{
 			Name:   "ca-public-key",
 			Value:  "id_rsa.ca.pub",
 			Usage:  "path to certificate authority public key",
-			EnvVar: "GATEWAYSSHD_CA_PUBLIC_KEY",
 		},
 		cli.StringFlag{
 			Name:   "host-certificate",
 			Value:  "id_rsa.host-cert.pub",
 			Usage:  "path to host certificate",
-			EnvVar: "GATEWAYSSHD_HOST_CERTIFICATE",
 		},
 		cli.StringFlag{
 			Name:   "host-private-key",
 			Value:  "id_rsa.host",
 			Usage:  "path to host private key",
-			EnvVar: "GATEWAYSSHD_HOST_PRIVATE_KEY",
 		},
 		cli.StringFlag{
 			Name:   "server-version",
 			Value:  "SSH-2.0-gatewaysshd",
 			Usage:  "server version string",
-			EnvVar: "GATEWAYSSHD_SERVER_VERSION",
 		},
-		cli.IntFlag{
+		cli.StringFlag{
 			Name:   "idle-timeout",
-			Value:  600,
-			Usage:  "idle timeout in seconds",
-			EnvVar: "GATEWAYSSHD_IDLE_TIMEOUT",
+			Value:  "600s",
+			Usage:  "idle timeout",
 		},
 	}
 
@@ -104,6 +96,12 @@ func Run(args []string) {
 		hostPrivateKey, err := ioutil.ReadFile(c.String("host-private-key"))
 		if err != nil {
 			log.Errorf("failed to load host private key from file \"%s\": %s", c.String("host-private-key"), err)
+			return err
+		}
+
+		idleTimeout, err := time.ParseDuration(c.String("idle-timeout"))
+		if err != nil {
+			log.Errorf("failed to parse idle timeout \"%s\": %s", c.String("idle-timeout"), err)
 			return err
 		}
 
@@ -136,7 +134,6 @@ func Run(args []string) {
 					log.Warningf("failed to accept incoming tcp connection: %s", err)
 					continue
 				}
-
 				go gateway.HandleConnection(tcp)
 			}
 		}()
@@ -150,7 +147,7 @@ func Run(args []string) {
 			case <-signaling:
 				quit = true
 			case <-time.After(30 * time.Second):
-				gateway.ScavengeSessions(time.Duration(c.Int("idle-timeout")) * time.Second)
+				gateway.ScavengeSessions(idleTimeout)
 			}
 		}
 

@@ -22,4 +22,3 @@ save:
 .PHONY: format
 format:
 	gofmt -l -w gateway cli
-
