@@ -66,7 +66,7 @@ func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateK
 	// create checker
 	// TODO: implement IsRevoked
 	checker := &ssh.CertChecker{
-		IsAuthority: func(key ssh.PublicKey) bool {
+		IsUserAuthority: func(key ssh.PublicKey) bool {
 			if bytes.Compare(ca.Marshal(), key.Marshal()) == 0 {
 				return true
 			}
