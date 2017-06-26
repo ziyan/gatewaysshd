@@ -36,44 +36,44 @@ func Run(args []string) {
 
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
-			Name:   "log-level",
-			Value:  "INFO",
-			Usage:  "log level",
+			Name:  "log-level",
+			Value: "INFO",
+			Usage: "log level",
 		},
 		cli.StringFlag{
-			Name:   "log-format",
-			Value:  "%{color}%{time:2006-01-02T15:04:05.000Z07:00} [%{level:.4s}] [%{shortfile} %{shortfunc}] %{message}%{color:reset}",
-			Usage:  "log format",
+			Name:  "log-format",
+			Value: "%{color}%{time:2006-01-02T15:04:05.000Z07:00} [%{level:.4s}] [%{shortfile} %{shortfunc}] %{message}%{color:reset}",
+			Usage: "log format",
 		},
 		cli.StringFlag{
-			Name:   "listen",
-			Value:  ":2020",
-			Usage:  "listen endpoint",
+			Name:  "listen",
+			Value: ":2020",
+			Usage: "listen endpoint",
 		},
 		cli.StringFlag{
-			Name:   "ca-public-key",
-			Value:  "id_rsa.ca.pub",
-			Usage:  "path to certificate authority public key",
+			Name:  "ca-public-key",
+			Value: "id_rsa.ca.pub",
+			Usage: "path to certificate authority public key",
 		},
 		cli.StringFlag{
-			Name:   "host-certificate",
-			Value:  "id_rsa.host-cert.pub",
-			Usage:  "path to host certificate",
+			Name:  "host-certificate",
+			Value: "id_rsa.host-cert.pub",
+			Usage: "path to host certificate",
 		},
 		cli.StringFlag{
-			Name:   "host-private-key",
-			Value:  "id_rsa.host",
-			Usage:  "path to host private key",
+			Name:  "host-private-key",
+			Value: "id_rsa.host",
+			Usage: "path to host private key",
 		},
 		cli.StringFlag{
-			Name:   "server-version",
-			Value:  "SSH-2.0-gatewaysshd",
-			Usage:  "server version string",
+			Name:  "server-version",
+			Value: "SSH-2.0-gatewaysshd",
+			Usage: "server version string",
 		},
 		cli.StringFlag{
-			Name:   "idle-timeout",
-			Value:  "600s",
-			Usage:  "idle timeout",
+			Name:  "idle-timeout",
+			Value: "600s",
+			Usage: "idle timeout",
 		},
 	}
 

@@ -128,19 +128,25 @@ func (c *Channel) HandleRequest(request *ssh.Request) {
 }
 
 func (c *Channel) HandleTunnelChannel(c2 *Channel) {
+	defer c2.Close()
+	defer c.Close()
 
-	// pipe the tunnels
+	done1 := make(chan struct{})
 	go func() {
-		defer c2.Close()
-		defer c.Close()
 		io.Copy(c, c2)
+		close(done1)
 	}()
 
+	done2 := make(chan struct{})
 	go func() {
-		defer c2.Close()
-		defer c.Close()
 		io.Copy(c2, c)
+		close(done2)
 	}()
+
+	select {
+	case <-done1:
+	case <-done2:
+	}
 }
 
 func (c *Channel) HandleSessionChannel() {
