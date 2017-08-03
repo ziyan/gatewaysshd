@@ -106,6 +106,9 @@ func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateK
 					log.Errorf("auth: failed to read revocation list: %s", err)
 					return true
 				}
+				if line[0] == '#' || line == "\n" {
+					continue
+				}
 				for _, match := range matches {
 					if line == match {
 						log.Errorf("auth: certificate revoked by revocation list: %s/%d", cert.KeyId, cert.Serial)
