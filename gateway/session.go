@@ -417,7 +417,7 @@ func (s *Session) HandleDirectChannel(newChannel ssh.NewChannel) (bool, ssh.Reje
 
 	// see if this connection is allowed
 	if _, ok := s.connection.Permissions.Extensions["permit-port-forwarding"]; !ok {
-		log.Warningf("refused to port forward: user = %s", s.user)
+		log.Warningf("no permission to port forward: user = %s", s.user)
 		return false, ssh.Prohibited
 	}
 

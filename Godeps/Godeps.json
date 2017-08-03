@@ -2,9 +2,6 @@
 	"ImportPath": "github.com/ziyan/gatewaysshd",
 	"GoVersion": "go1.8",
 	"GodepVersion": "v79",
-	"Packages": [
-		"./..."
-	],
 	"Deps": [
 		{
 			"ImportPath": "github.com/op/go-logging",
@@ -13,24 +10,24 @@
 		},
 		{
 			"ImportPath": "github.com/urfave/cli",
-			"Comment": "v1.18.0-37-gd9021fa",
-			"Rev": "d9021faab69f92295ef7061bd39e4a76dcbdef32"
+			"Comment": "v1.19.1-54-g4b90d79",
+			"Rev": "4b90d79a682b4bf685762c7452db20f2a676ecb2"
 		},
 		{
 			"ImportPath": "golang.org/x/crypto/curve25519",
-			"Rev": "adbae1b6b6fb4b02448a0fc0dbbc9ba2b95b294d"
+			"Rev": "358f15eacb587b056fc93273b930314a5cda12fe"
 		},
 		{
 			"ImportPath": "golang.org/x/crypto/ed25519",
-			"Rev": "adbae1b6b6fb4b02448a0fc0dbbc9ba2b95b294d"
+			"Rev": "358f15eacb587b056fc93273b930314a5cda12fe"
 		},
 		{
 			"ImportPath": "golang.org/x/crypto/ed25519/internal/edwards25519",
-			"Rev": "adbae1b6b6fb4b02448a0fc0dbbc9ba2b95b294d"
+			"Rev": "358f15eacb587b056fc93273b930314a5cda12fe"
 		},
 		{
 			"ImportPath": "golang.org/x/crypto/ssh",
-			"Rev": "adbae1b6b6fb4b02448a0fc0dbbc9ba2b95b294d"
+			"Rev": "358f15eacb587b056fc93273b930314a5cda12fe"
 		}
 	]
 }

@@ -1,9 +1,13 @@
 package gateway
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
+	"fmt"
+	"io"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -26,7 +30,7 @@ type Gateway struct {
 	closeOnce     sync.Once
 }
 
-func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateKey []byte) (*Gateway, error) {
+func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateKey []byte, revocationList string) (*Gateway, error) {
 
 	// parse certificate authority
 	ca, _, _, _, err := ssh.ParseAuthorizedKey(caPublicKey)
@@ -64,16 +68,51 @@ func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateK
 	log.Debugf("auth: host_public_key = %v", key.PublicKey())
 
 	// create checker
-	// TODO: implement IsRevoked
 	checker := &ssh.CertChecker{
 		IsUserAuthority: func(key ssh.PublicKey) bool {
 			if bytes.Compare(ca.Marshal(), key.Marshal()) == 0 {
 				return true
 			}
-			log.Debugf("auth: unknown authority: %v", key)
+			log.Errorf("auth: unknown authority: %v", key)
 			return false
 		},
 		IsRevoked: func(cert *ssh.Certificate) bool {
+			// if revocation list file does not exist, assume everything is good
+			if _, err := os.Stat(revocationList); os.IsNotExist(err) {
+				return false
+			}
+
+			file, err := os.Open(revocationList)
+			if err != nil {
+				log.Errorf("auth: failed to open revocation list: %s", err)
+				return true
+			}
+			defer file.Close()
+
+			// if line matches any of the following, it is considered revoked
+			matches := []string{
+				fmt.Sprintf("%s\n", cert.KeyId),
+				fmt.Sprintf("%d\n", cert.Serial),
+				fmt.Sprintf("%s/%d\n", cert.KeyId, cert.Serial),
+			}
+
+			reader := bufio.NewReader(file)
+			for {
+				line, err := reader.ReadString('\n')
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					log.Errorf("auth: failed to read revocation list: %s", err)
+					return true
+				}
+				for _, match := range matches {
+					if line == match {
+						log.Errorf("auth: certificate revoked by revocation list: %s/%d", cert.KeyId, cert.Serial)
+						return true
+					}
+				}
+			}
 			return false
 		},
 	}
@@ -115,7 +154,7 @@ func (g *Gateway) Close() {
 }
 
 func (g *Gateway) HandleConnection(c net.Conn) {
-	log.Debugf("new tcp connection: remote = %s, local = %s", c.RemoteAddr(), c.LocalAddr())
+	log.Infof("new tcp connection: remote = %s, local = %s", c.RemoteAddr(), c.LocalAddr())
 
 	connection, channels, requests, err := ssh.NewServerConn(c, g.config)
 	if err != nil {

@@ -71,6 +71,11 @@ func Run(args []string) {
 			Usage: "server version string",
 		},
 		cli.StringFlag{
+			Name:  "revocation-list",
+			Value: "crl.txt",
+			Usage: "a file containing one certificate key id per line for revoked certificates",
+		},
+		cli.StringFlag{
 			Name:  "idle-timeout",
 			Value: "600s",
 			Usage: "idle timeout",
@@ -106,7 +111,7 @@ func Run(args []string) {
 		}
 
 		// create gateway
-		gateway, err := gateway.NewGateway(c.String("server-version"), caPublicKey, hostCertificate, hostPrivateKey)
+		gateway, err := gateway.NewGateway(c.String("server-version"), caPublicKey, hostCertificate, hostPrivateKey, c.String("revocation-list"))
 		if err != nil {
 			log.Errorf("failed to create ssh gateway: %s", err)
 			return err
