@@ -370,6 +370,12 @@ func (s *Session) HandleSessionChannel(newChannel ssh.NewChannel) (bool, ssh.Rej
 		return false, ssh.Prohibited
 	}
 
+	// see if this connection is allowed
+	if _, ok := s.connection.Permissions.Extensions["permit-port-forwarding"]; !ok {
+		log.Warningf("no permission to see session list: user = %s", s.user)
+		return false, ssh.Prohibited
+	}
+
 	// accept the channel
 	channel, requests, err := newChannel.Accept()
 	if err != nil {
