@@ -23,7 +23,7 @@ type Tunnel struct {
 }
 
 func newTunnel(connection *Connection, channel ssh.Channel, channelType string, extraData []byte, metadata map[string]interface{}) (*Tunnel, error) {
-	log.Infof("new tunnel: user = %s, remote = %v, type = %s", connection.user, connection.remoteAddr, channelType)
+	log.Infof("new tunnel: user = %s, remote = %v, type = %s, metadata = %v", connection.user, connection.remoteAddr, channelType, metadata)
 	return &Tunnel{
 		connection:  connection,
 		channel:     channel,
@@ -43,7 +43,7 @@ func (t *Tunnel) Close() {
 			log.Warningf("failed to close tunnel: %s", err)
 		}
 
-		log.Infof("tunnel closed: user = %s, remote = %v, type = %s, read = %d, written = %d", t.connection.user, t.connection.remoteAddr, t.channelType, t.bytesRead, t.bytesWritten)
+		log.Infof("tunnel closed: user = %s, remote = %v, type = %s, metadata = %v, read = %d, written = %d", t.connection.user, t.connection.remoteAddr, t.channelType, t.metadata, t.bytesRead, t.bytesWritten)
 	})
 }
 
