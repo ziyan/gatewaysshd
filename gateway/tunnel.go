@@ -30,13 +30,11 @@ func newTunnel(connection *Connection, channel ssh.Channel, channelType string, 
 		extraData:   extraData,
 		created:     time.Now(),
 		used:        time.Now(),
-		active:      true,
 	}, nil
 }
 
 func (t *Tunnel) Close() {
 	t.closeOnce.Do(func() {
-		t.active = false
 		t.connection.deleteTunnel(t)
 
 		if err := t.channel.Close(); err != nil {
@@ -94,6 +92,15 @@ func (t *Tunnel) handleTunnel(t2 *Tunnel) {
 	select {
 	case <-done1:
 	case <-done2:
+	}
+}
+
+func (t *Tunnel) gatherStatus() map[string]interface{} {
+	return map[string]interface{}{
+		"created":       t.created.Unix(),
+		"used":          t.used.Unix(),
+		"bytes_read":    t.bytesRead,
+		"bytes_written": t.bytesWritten,
 	}
 }
 

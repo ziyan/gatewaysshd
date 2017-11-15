@@ -5,22 +5,16 @@ import (
 	"io"
 	"io/ioutil"
 	"sync"
-	"time"
 
 	"golang.org/x/crypto/ssh"
 )
 
 type Session struct {
-	connection   *Connection
-	channel      ssh.Channel
-	channelType  string
-	extraData    []byte
-	active       bool
-	closeOnce    sync.Once
-	created      time.Time
-	used         time.Time
-	bytesRead    uint64
-	bytesWritten uint64
+	connection  *Connection
+	channel     ssh.Channel
+	channelType string
+	extraData   []byte
+	closeOnce   sync.Once
 }
 
 func newSession(connection *Connection, channel ssh.Channel, channelType string, extraData []byte) (*Session, error) {
@@ -30,22 +24,18 @@ func newSession(connection *Connection, channel ssh.Channel, channelType string,
 		channel:     channel,
 		channelType: channelType,
 		extraData:   extraData,
-		created:     time.Now(),
-		used:        time.Now(),
-		active:      true,
 	}, nil
 }
 
 func (s *Session) Close() {
 	s.closeOnce.Do(func() {
-		s.active = false
 		s.connection.deleteSession(s)
 
 		if err := s.channel.Close(); err != nil {
 			log.Warningf("failed to close session: %s", err)
 		}
 
-		log.Debugf("session closed: user = %s, remote = %v, type = %s, read = %d, written = %d", s.connection.user, s.connection.remoteAddr, s.channelType, s.bytesRead, s.bytesWritten)
+		log.Debugf("session closed: user = %s, remote = %v, type = %s", s.connection.user, s.connection.remoteAddr, s.channelType)
 	})
 }
 
@@ -64,7 +54,6 @@ func (s *Session) handleRequests(requests <-chan *ssh.Request) {
 	defer s.Close()
 
 	for request := range requests {
-		s.used = time.Now()
 		go s.handleRequest(request)
 	}
 }
@@ -101,12 +90,13 @@ func (s *Session) handleRequest(request *ssh.Request) {
 	case "shell":
 		defer s.Close()
 
+		var status map[string]interface{}
 		if !s.connection.admin {
-			log.Warningf("no permission to see session list: user = %s", s.connection.user)
-			break
+			status = s.connection.gatherStatus()
+		} else {
+			status = s.connection.gateway.gatherStatus()
 		}
 
-		status := s.connection.gateway.Status()
 		encoded, err := json.MarshalIndent(status, "", "  ")
 		if err != nil {
 			log.Warningf("failed to marshal status: %s", err)
@@ -132,25 +122,19 @@ func (s *Session) handleRequest(request *ssh.Request) {
 			break
 		}
 
-		var raw json.RawMessage
-		if err := json.Unmarshal([]byte(r.Command), &raw); err != nil {
+		var status json.RawMessage
+		if err := json.Unmarshal([]byte(r.Command), &status); err != nil {
 			log.Warningf("failed to unmarshal json: %s", err)
 			break
 		}
-		s.connection.state = raw
+		s.connection.reportStatus(status)
 	}
 }
 
 func (s *Session) Read(data []byte) (int, error) {
-	size, err := s.channel.Read(data)
-	s.bytesRead += uint64(size)
-	s.used = time.Now()
-	return size, err
+	return s.channel.Read(data)
 }
 
 func (s *Session) Write(data []byte) (int, error) {
-	size, err := s.channel.Write(data)
-	s.bytesWritten += uint64(size)
-	s.used = time.Now()
-	return size, err
+	return s.channel.Write(data)
 }

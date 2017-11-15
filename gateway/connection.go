@@ -16,23 +16,23 @@ var (
 )
 
 type Connection struct {
-	gateway      *Gateway
-	conn         *ssh.ServerConn
-	user         string
-	remoteAddr   net.Addr
-	localAddr    net.Addr
-	sessions     []*Session
-	tunnels      []*Tunnel
-	services     map[string]map[uint16]bool
-	lock         *sync.Mutex
-	active       bool
-	closeOnce    sync.Once
-	created      time.Time
-	used         time.Time
-	bytesRead    uint64
-	bytesWritten uint64
-	state        json.RawMessage
-	admin        bool
+	gateway       *Gateway
+	conn          *ssh.ServerConn
+	user          string
+	remoteAddr    net.Addr
+	localAddr     net.Addr
+	sessions      []*Session
+	tunnels       []*Tunnel
+	tunnelsClosed uint64
+	services      map[string]map[uint16]bool
+	lock          *sync.Mutex
+	closeOnce     sync.Once
+	created       time.Time
+	used          time.Time
+	bytesRead     uint64
+	bytesWritten  uint64
+	admin         bool
+	status        json.RawMessage
 }
 
 func newConnection(gateway *Gateway, conn *ssh.ServerConn) (*Connection, error) {
@@ -51,7 +51,6 @@ func newConnection(gateway *Gateway, conn *ssh.ServerConn) (*Connection, error) 
 		localAddr:  conn.LocalAddr(),
 		services:   make(map[string]map[uint16]bool),
 		lock:       &sync.Mutex{},
-		active:     true,
 		created:    time.Now(),
 		used:       time.Now(),
 		admin:      admin,
@@ -60,7 +59,6 @@ func newConnection(gateway *Gateway, conn *ssh.ServerConn) (*Connection, error) 
 
 func (c *Connection) Close() {
 	c.closeOnce.Do(func() {
-		c.active = false
 		c.gateway.deleteConnection(c)
 
 		for _, session := range c.Sessions() {
@@ -75,7 +73,7 @@ func (c *Connection) Close() {
 			log.Debugf("failed to close connection: %s", err)
 		}
 
-		log.Infof("connection closed: user = %s, remote = %v, status = %v", c.user, c.remoteAddr, c.Status())
+		log.Infof("connection closed: user = %s, remote = %v, read = %d, written = %d", c.user, c.remoteAddr, c.bytesRead, c.bytesWritten)
 	})
 }
 
@@ -141,6 +139,7 @@ func (c *Connection) deleteTunnel(t *Tunnel) {
 	// keep stats
 	c.bytesRead += t.bytesRead
 	c.bytesWritten += t.bytesWritten
+	c.tunnelsClosed += 1
 }
 
 func (c *Connection) Services() map[string][]uint16 {
@@ -159,17 +158,16 @@ func (c *Connection) Services() map[string][]uint16 {
 	return services
 }
 
-func (c *Connection) Status() map[string]interface{} {
+func (c *Connection) reportStatus(status json.RawMessage) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	// stats
-	bytesRead := c.bytesRead
-	bytesWritten := c.bytesWritten
-	for _, tunnel := range c.tunnels {
-		bytesRead += tunnel.bytesRead
-		bytesWritten += tunnel.bytesWritten
-	}
+	c.status = status
+}
+
+func (c *Connection) gatherStatus() map[string]interface{} {
+	c.lock.Lock()
+	defer c.lock.Unlock()
 
 	// services
 	services := make(map[string][]uint16)
@@ -181,20 +179,29 @@ func (c *Connection) Status() map[string]interface{} {
 		}
 	}
 
+	bytesRead := c.bytesRead
+	bytesWritten := c.bytesWritten
+	tunnels := make([]interface{}, 0, len(c.tunnels))
+	for _, tunnel := range c.tunnels {
+		tunnels = append(tunnels, tunnel.gatherStatus())
+		bytesRead += tunnel.bytesRead
+		bytesWritten += tunnel.bytesWritten
+	}
+
 	return map[string]interface{}{
 		"user":           c.user,
 		"admin":          c.admin,
 		"address":        c.remoteAddr.String(),
-		"sessions_count": len(c.sessions),
-		"tunnels_count":  len(c.tunnels),
+		"tunnels":        tunnels,
+		"tunnels_closed": c.tunnelsClosed,
 		"created":        c.created.Unix(),
 		"used":           c.used.Unix(),
 		"up_time":        uint64(time.Since(c.created).Seconds()),
 		"idle_time":      uint64(time.Since(c.used).Seconds()),
-		"bytes_read":     bytesRead,
-		"bytes_written":  bytesWritten,
+		"bytes_read":     c.bytesRead,
+		"bytes_written":  c.bytesWritten,
 		"services":       services,
-		"state":          c.state,
+		"status":         c.status,
 	}
 }
 

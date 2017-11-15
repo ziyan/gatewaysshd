@@ -250,13 +250,13 @@ func (g *Gateway) ScavengeConnections(timeout time.Duration) {
 	}
 }
 
-func (g *Gateway) Status() map[string]interface{} {
+func (g *Gateway) gatherStatus() map[string]interface{} {
 	g.lock.Lock()
 	defer g.lock.Unlock()
 
 	connections := make([]interface{}, 0, len(g.connectionsList))
 	for _, connection := range g.connectionsList {
-		connections = append(connections, connection.Status())
+		connections = append(connections, connection.gatherStatus())
 	}
 
 	return map[string]interface{}{
