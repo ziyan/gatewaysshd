@@ -152,7 +152,7 @@ func Run(args []string) {
 			case <-signaling:
 				quit = true
 			case <-time.After(30 * time.Second):
-				gateway.ScavengeSessions(idleTimeout)
+				gateway.ScavengeConnections(idleTimeout)
 			}
 		}
 

@@ -11,13 +11,13 @@ var (
 	ErrInvalidTunnelData     = errors.New("gatewaysshd: invalid tunnel data")
 )
 
-type ForwardRequest struct {
+type forwardRequest struct {
 	Host string
 	Port uint32
 }
 
-func UnmarshalForwardRequest(payload []byte) (*ForwardRequest, error) {
-	request := &ForwardRequest{}
+func unmarshalForwardRequest(payload []byte) (*forwardRequest, error) {
+	request := &forwardRequest{}
 
 	if err := ssh.Unmarshal(payload, request); err != nil {
 		return nil, err
@@ -31,23 +31,23 @@ func UnmarshalForwardRequest(payload []byte) (*ForwardRequest, error) {
 	return request, nil
 }
 
-type ForwardReply struct {
+type forwardReply struct {
 	Port uint32
 }
 
-func MarshalForwardReply(reply *ForwardReply) []byte {
+func marshalForwardReply(reply *forwardReply) []byte {
 	return ssh.Marshal(reply)
 }
 
-type TunnelData struct {
+type tunnelData struct {
 	Host          string
 	Port          uint32
 	OriginAddress string
 	OriginPort    uint32
 }
 
-func UnmarshalTunnelData(payload []byte) (*TunnelData, error) {
-	data := &TunnelData{}
+func unmarshalTunnelData(payload []byte) (*tunnelData, error) {
+	data := &tunnelData{}
 
 	if err := ssh.Unmarshal(payload, data); err != nil {
 		return nil, err
@@ -65,6 +65,20 @@ func UnmarshalTunnelData(payload []byte) (*TunnelData, error) {
 	return data, nil
 }
 
-func MarshalTunnelData(data *TunnelData) []byte {
+func marshalTunnelData(data *tunnelData) []byte {
 	return ssh.Marshal(data)
+}
+
+type executeRequest struct {
+	Command string
+}
+
+func unmarshalExecuteRequest(payload []byte) (*executeRequest, error) {
+	request := &executeRequest{}
+
+	if err := ssh.Unmarshal(payload, request); err != nil {
+		return nil, err
+	}
+
+	return request, nil
 }

@@ -23,11 +23,11 @@ var (
 )
 
 type Gateway struct {
-	config        *ssh.ServerConfig
-	sessionsIndex map[string][]*Session
-	sessionsList  []*Session
-	lock          *sync.Mutex
-	closeOnce     sync.Once
+	config           *ssh.ServerConfig
+	connectionsIndex map[string][]*Connection
+	connectionsList  []*Connection
+	lock             *sync.Mutex
+	closeOnce        sync.Once
 }
 
 func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateKey []byte, revocationList string) (*Gateway, error) {
@@ -141,17 +141,17 @@ func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateK
 	config.AddHostKey(host)
 
 	return &Gateway{
-		config:        config,
-		sessionsIndex: make(map[string][]*Session),
-		sessionsList:  make([]*Session, 0),
-		lock:          &sync.Mutex{},
+		config:           config,
+		connectionsIndex: make(map[string][]*Connection),
+		connectionsList:  make([]*Connection, 0),
+		lock:             &sync.Mutex{},
 	}, nil
 }
 
 func (g *Gateway) Close() {
 	g.closeOnce.Do(func() {
-		for _, session := range g.Sessions() {
-			session.Close()
+		for _, connection := range g.Connections() {
+			connection.Close()
 		}
 	})
 }
@@ -159,59 +159,58 @@ func (g *Gateway) Close() {
 func (g *Gateway) HandleConnection(c net.Conn) {
 	log.Infof("new tcp connection: remote = %s, local = %s", c.RemoteAddr(), c.LocalAddr())
 
-	connection, channels, requests, err := ssh.NewServerConn(c, g.config)
+	conn, channels, requests, err := ssh.NewServerConn(c, g.config)
 	if err != nil {
 		log.Warningf("failed during ssh handshake: %s", err)
 		return
 	}
 
-	// create a session and handle it
-	session, err := NewSession(g, connection)
+	// create a connection and handle it
+	connection, err := newConnection(g, conn)
 	if err != nil {
-		log.Errorf("failed to create session: %s", err)
-		if err := connection.Close(); err != nil {
+		log.Errorf("failed to create connection: %s", err)
+		if err := conn.Close(); err != nil {
 			log.Warningf("failed to close connection: %s", err)
 		}
 		return
 	}
-	g.AddSession(session)
+	g.addConnection(connection)
 
-	go session.HandleRequests(requests)
-	go session.HandleChannels(channels)
+	connection.Handle(requests, channels)
 }
 
-// add session to the list of sessions
-func (g *Gateway) AddSession(s *Session) {
+// add connection to the list of connections
+func (g *Gateway) addConnection(c *Connection) {
 	g.lock.Lock()
 	defer g.lock.Unlock()
 
-	g.sessionsIndex[s.User()] = append([]*Session{s}, g.sessionsIndex[s.User()]...)
-	g.sessionsList = append([]*Session{s}, g.sessionsList...)
+	g.connectionsIndex[c.user] = append([]*Connection{c}, g.connectionsIndex[c.user]...)
+	g.connectionsList = append([]*Connection{c}, g.connectionsList...)
 
 }
 
-func (g *Gateway) DeleteSession(s *Session) {
+func (g *Gateway) deleteConnection(c *Connection) {
 	g.lock.Lock()
 	defer g.lock.Unlock()
 
-	sessions := make([]*Session, 0, len(g.sessionsIndex[s.User()]))
-	for _, session := range g.sessionsIndex[s.User()] {
-		if session != s {
-			sessions = append(sessions, session)
+	connections := make([]*Connection, 0, len(g.connectionsIndex[c.user]))
+	for _, connection := range g.connectionsIndex[c.user] {
+		if connection != c {
+			connections = append(connections, connection)
 		}
 	}
-	g.sessionsIndex[s.User()] = sessions
+	g.connectionsIndex[c.user] = connections
 
-	sessions = make([]*Session, 0, len(g.sessionsList))
-	for _, session := range g.sessionsList {
-		if session != s {
-			sessions = append(sessions, session)
+	connections = make([]*Connection, 0, len(g.connectionsList))
+	for _, connection := range g.connectionsList {
+		if connection != c {
+			connections = append(connections, connection)
 		}
 	}
-	g.sessionsList = sessions
+	g.connectionsList = connections
 }
 
-func (g *Gateway) LookupSessionService(host string, port uint16) (*Session, string, uint16) {
+func (g *Gateway) lookupConnectionService(host string, port uint16) (*Connection, string, uint16) {
 	g.lock.Lock()
 	defer g.lock.Unlock()
 
@@ -220,10 +219,10 @@ func (g *Gateway) LookupSessionService(host string, port uint16) (*Session, stri
 		host := strings.Join(parts[:i], ".")
 		user := strings.Join(parts[i:], ".")
 
-		for _, session := range g.sessionsIndex[user] {
-			if session.LookupService(host, port) {
+		for _, connection := range g.connectionsIndex[user] {
+			if connection.lookupService(host, port) {
 				log.Infof("lookup: found service: user = %s, host = %s, port = %d", user, host, port)
-				return session, host, port
+				return connection, host, port
 			}
 		}
 	}
@@ -232,21 +231,21 @@ func (g *Gateway) LookupSessionService(host string, port uint16) (*Session, stri
 	return nil, "", 0
 }
 
-func (g *Gateway) Sessions() []*Session {
+func (g *Gateway) Connections() []*Connection {
 	g.lock.Lock()
 	defer g.lock.Unlock()
 
-	sessions := make([]*Session, len(g.sessionsList))
-	copy(sessions, g.sessionsList)
-	return sessions
+	connections := make([]*Connection, len(g.connectionsList))
+	copy(connections, g.connectionsList)
+	return connections
 }
 
-func (g *Gateway) ScavengeSessions(timeout time.Duration) {
-	for _, session := range g.Sessions() {
-		idle := time.Since(session.Used())
+func (g *Gateway) ScavengeConnections(timeout time.Duration) {
+	for _, connection := range g.Connections() {
+		idle := time.Since(connection.used)
 		if idle > timeout {
-			log.Infof("scavenge: session for %s timed out after %d seconds", session.User(), uint64(idle.Seconds()))
-			session.Close()
+			log.Infof("scavenge: connection for %s timed out after %d seconds", connection.user, uint64(idle.Seconds()))
+			connection.Close()
 		}
 	}
 }
@@ -255,12 +254,12 @@ func (g *Gateway) Status() map[string]interface{} {
 	g.lock.Lock()
 	defer g.lock.Unlock()
 
-	sessions := make([]interface{}, 0, len(g.sessionsList))
-	for _, session := range g.sessionsList {
-		sessions = append(sessions, session.Status())
+	connections := make([]interface{}, 0, len(g.connectionsList))
+	for _, connection := range g.connectionsList {
+		connections = append(connections, connection.Status())
 	}
 
 	return map[string]interface{}{
-		"sessions": sessions,
+		"connections": connections,
 	}
 }
