@@ -395,7 +395,16 @@ func (c *Connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ssh.R
 	data.Host = host
 	data.Port = uint32(port)
 
-	tunnel2, err := connection.openTunnel("forwarded-tcpip", marshalTunnelData(data))
+	tunnel2, err := connection.openTunnel("forwarded-tcpip", marshalTunnelData(data), map[string]interface{}{
+		"from": map[string]interface{}{
+			"address": c.remoteAddr.String(),
+			"user":    c.user,
+		},
+		"service": map[string]interface{}{
+			"host": data.Host,
+			"port": data.Port,
+		},
+	})
 	if err != nil {
 		return false, ssh.ConnectionFailed
 	}
@@ -421,7 +430,16 @@ func (c *Connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ssh.R
 		}
 	}()
 
-	tunnel, err := newTunnel(c, channel, newChannel.ChannelType(), newChannel.ExtraData())
+	tunnel, err := newTunnel(c, channel, newChannel.ChannelType(), newChannel.ExtraData(), map[string]interface{}{
+		"to": map[string]interface{}{
+			"user":    connection.user,
+			"address": connection.remoteAddr.String(),
+		},
+		"service": map[string]interface{}{
+			"host": data.Host,
+			"port": data.Port,
+		},
+	})
 	if err != nil {
 		log.Errorf("failed to create accepted channel: %s", err)
 		return true, 0
@@ -438,7 +456,7 @@ func (c *Connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ssh.R
 }
 
 // open a channel from the server to the client side
-func (c *Connection) openTunnel(channelType string, extraData []byte) (*Tunnel, error) {
+func (c *Connection) openTunnel(channelType string, extraData []byte, metadata map[string]interface{}) (*Tunnel, error) {
 	log.Debugf("opening channel: type = %s, data = %v", channelType, extraData)
 
 	channel, requests, err := c.conn.OpenChannel(channelType, extraData)
@@ -453,7 +471,7 @@ func (c *Connection) openTunnel(channelType string, extraData []byte) (*Tunnel, 
 		}
 	}()
 
-	tunnel, err := newTunnel(c, channel, channelType, extraData)
+	tunnel, err := newTunnel(c, channel, channelType, extraData, metadata)
 	if err != nil {
 		return nil, err
 	}

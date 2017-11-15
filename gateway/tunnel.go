@@ -19,9 +19,10 @@ type Tunnel struct {
 	used         time.Time
 	bytesRead    uint64
 	bytesWritten uint64
+	metadata     map[string]interface{}
 }
 
-func newTunnel(connection *Connection, channel ssh.Channel, channelType string, extraData []byte) (*Tunnel, error) {
+func newTunnel(connection *Connection, channel ssh.Channel, channelType string, extraData []byte, metadata map[string]interface{}) (*Tunnel, error) {
 	log.Infof("new tunnel: user = %s, remote = %v, type = %s", connection.user, connection.remoteAddr, channelType)
 	return &Tunnel{
 		connection:  connection,
@@ -30,6 +31,7 @@ func newTunnel(connection *Connection, channel ssh.Channel, channelType string, 
 		extraData:   extraData,
 		created:     time.Now(),
 		used:        time.Now(),
+		metadata:    metadata,
 	}, nil
 }
 
@@ -96,12 +98,17 @@ func (t *Tunnel) handleTunnel(t2 *Tunnel) {
 }
 
 func (t *Tunnel) gatherStatus() map[string]interface{} {
-	return map[string]interface{}{
+	status := map[string]interface{}{
+		"type":          t.channelType,
 		"created":       t.created.Unix(),
 		"used":          t.used.Unix(),
 		"bytes_read":    t.bytesRead,
 		"bytes_written": t.bytesWritten,
 	}
+	for k, v := range t.metadata {
+		status[k] = v
+	}
+	return status
 }
 
 func (t *Tunnel) Read(data []byte) (int, error) {
