@@ -5,16 +5,21 @@ import (
 	"io"
 	"io/ioutil"
 	"sync"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
 
 type Session struct {
-	connection  *Connection
-	channel     ssh.Channel
-	channelType string
-	extraData   []byte
-	closeOnce   sync.Once
+	connection   *Connection
+	channel      ssh.Channel
+	channelType  string
+	extraData    []byte
+	closeOnce    sync.Once
+	created      time.Time
+	used         time.Time
+	bytesRead    uint64
+	bytesWritten uint64
 }
 
 func newSession(connection *Connection, channel ssh.Channel, channelType string, extraData []byte) (*Session, error) {
@@ -24,6 +29,8 @@ func newSession(connection *Connection, channel ssh.Channel, channelType string,
 		channel:     channel,
 		channelType: channelType,
 		extraData:   extraData,
+		created:     time.Now(),
+		used:        time.Now(),
 	}, nil
 }
 
@@ -35,7 +42,7 @@ func (s *Session) Close() {
 			log.Warningf("failed to close session: %s", err)
 		}
 
-		log.Debugf("session closed: user = %s, remote = %v, type = %s", s.connection.user, s.connection.remoteAddr, s.channelType)
+		log.Debugf("session closed: user = %s, remote = %v, type = %s, read = %d, written = %d", s.connection.user, s.connection.remoteAddr, s.channelType, s.bytesRead, s.bytesWritten)
 	})
 }
 
@@ -54,6 +61,7 @@ func (s *Session) handleRequests(requests <-chan *ssh.Request) {
 	defer s.Close()
 
 	for request := range requests {
+		s.used = time.Now()
 		go s.handleRequest(request)
 	}
 }
@@ -131,10 +139,26 @@ func (s *Session) handleRequest(request *ssh.Request) {
 	}
 }
 
+func (s *Session) gatherStatus() map[string]interface{} {
+	return map[string]interface{}{
+		"type":          s.channelType,
+		"created":       s.created.Unix(),
+		"used":          s.used.Unix(),
+		"bytes_read":    s.bytesRead,
+		"bytes_written": s.bytesWritten,
+	}
+}
+
 func (s *Session) Read(data []byte) (int, error) {
-	return s.channel.Read(data)
+	size, err := s.channel.Read(data)
+	s.bytesRead += uint64(size)
+	s.used = time.Now()
+	return size, err
 }
 
 func (s *Session) Write(data []byte) (int, error) {
-	return s.channel.Write(data)
+	size, err := s.channel.Write(data)
+	s.bytesWritten += uint64(size)
+	s.used = time.Now()
+	return size, err
 }

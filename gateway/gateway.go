@@ -242,7 +242,7 @@ func (g *Gateway) Connections() []*Connection {
 
 func (g *Gateway) ScavengeConnections(timeout time.Duration) {
 	for _, connection := range g.Connections() {
-		idle := time.Since(connection.used)
+		idle := time.Since(connection.Used())
 		if idle > timeout {
 			log.Infof("scavenge: connection for %s timed out after %d seconds", connection.user, uint64(idle.Seconds()))
 			connection.Close()
