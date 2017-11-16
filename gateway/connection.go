@@ -442,10 +442,15 @@ func (c *Connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ssh.R
 	}
 
 	// found the service, attempt to open a channel
-	data.Host = host
-	data.Port = uint32(port)
+	data2 := &tunnelData{
+		Host:          host,
+		Port:          uint32(port),
+		OriginAddress: data.OriginAddress,
+		OriginPort:    data.OriginPort,
+	}
 
-	tunnel2, err := connection.openTunnel("forwarded-tcpip", marshalTunnelData(data), map[string]interface{}{
+	tunnel2, err := connection.openTunnel("forwarded-tcpip", marshalTunnelData(data2), map[string]interface{}{
+		"origin": data.OriginAddress,
 		"from": map[string]interface{}{
 			"address": c.remoteAddr.String(),
 			"user":    c.user,
@@ -481,6 +486,7 @@ func (c *Connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ssh.R
 	}()
 
 	tunnel, err := newTunnel(c, channel, newChannel.ChannelType(), newChannel.ExtraData(), map[string]interface{}{
+		"origin": data.OriginAddress,
 		"to": map[string]interface{}{
 			"user":    connection.user,
 			"address": connection.remoteAddr.String(),
