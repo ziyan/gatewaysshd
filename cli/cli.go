@@ -80,6 +80,16 @@ func Run(args []string) {
 			Value: "600s",
 			Usage: "idle timeout",
 		},
+		cli.StringFlag{
+			Name:  "status-file",
+			Value: "status.json",
+			Usage: "file to store summary status report",
+		},
+		cli.StringFlag{
+			Name:  "status-directory",
+			Value: "status",
+			Usage: "directory to store status reports",
+		},
 	}
 
 	app.Action = func(c *cli.Context) error {
@@ -110,8 +120,13 @@ func Run(args []string) {
 			return err
 		}
 
+		if err := os.MkdirAll(c.String("status-directory"), 0755); err != nil {
+			log.Errorf("failed to create status directory \"%s\": %s", c.String("status-directory"), err)
+			return err
+		}
+
 		// create gateway
-		gateway, err := gateway.NewGateway(c.String("server-version"), caPublicKey, hostCertificate, hostPrivateKey, c.String("revocation-list"))
+		gateway, err := gateway.NewGateway(c.String("server-version"), caPublicKey, hostCertificate, hostPrivateKey, c.String("revocation-list"), c.String("status-file"), c.String("status-directory"))
 		if err != nil {
 			log.Errorf("failed to create ssh gateway: %s", err)
 			return err
@@ -153,6 +168,8 @@ func Run(args []string) {
 				quit = true
 			case <-time.After(30 * time.Second):
 				gateway.ScavengeConnections(idleTimeout)
+			case <-time.After(3 * time.Second):
+				gateway.WriteStatus()
 			}
 		}
 

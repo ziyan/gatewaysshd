@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -196,6 +198,38 @@ func (c *Connection) reportStatus(status json.RawMessage) {
 	defer c.lock.Unlock()
 
 	c.status = status
+
+	// save a copy of the status on disk
+	if err := c.writeStatus(); err != nil {
+		log.Warningf("failed to write status for %s: %s", c.user, err)
+	}
+}
+
+func (c *Connection) writeStatus() error {
+	if c.gateway.statusDirectory == "" {
+		return nil
+	}
+
+	encoded, err := json.MarshalIndent(c.status, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	filename := filepath.Join(c.gateway.statusDirectory, c.user+".json")
+	file, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	if _, err := file.Write(encoded); err != nil {
+		return err
+	}
+	if _, err := file.WriteString("\n"); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (c *Connection) gatherStatus() map[string]interface{} {
