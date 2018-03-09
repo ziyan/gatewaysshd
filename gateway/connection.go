@@ -232,7 +232,7 @@ func (c *Connection) writeStatus() error {
 	return nil
 }
 
-func (c *Connection) gatherStatus() map[string]interface{} {
+func (c *Connection) gatherStatus(includeReportedStatus bool) map[string]interface{} {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -270,7 +270,7 @@ func (c *Connection) gatherStatus() map[string]interface{} {
 		}
 	}
 
-	return map[string]interface{}{
+	status := map[string]interface{}{
 		"user":            c.user,
 		"admin":           c.admin,
 		"address":         c.remoteAddr.String(),
@@ -285,8 +285,13 @@ func (c *Connection) gatherStatus() map[string]interface{} {
 		"bytes_read":      c.bytesRead,
 		"bytes_written":   c.bytesWritten,
 		"services":        services,
-		"status":          c.status,
 	}
+
+	if includeReportedStatus {
+		status["status"] = c.status
+	}
+
+	return status
 }
 
 func (c *Connection) lookupService(host string, port uint16) bool {

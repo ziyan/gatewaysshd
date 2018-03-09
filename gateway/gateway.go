@@ -254,13 +254,13 @@ func (g *Gateway) ScavengeConnections(timeout time.Duration) {
 	}
 }
 
-func (g *Gateway) gatherStatus() map[string]interface{} {
+func (g *Gateway) gatherStatus(includeReportedStatus bool) map[string]interface{} {
 	g.lock.Lock()
 	defer g.lock.Unlock()
 
 	connections := make([]interface{}, 0, len(g.connectionsList))
 	for _, connection := range g.connectionsList {
-		connections = append(connections, connection.gatherStatus())
+		connections = append(connections, connection.gatherStatus(includeReportedStatus))
 	}
 
 	return map[string]interface{}{
@@ -279,7 +279,7 @@ func (g *Gateway) writeStatus() error {
 		return nil
 	}
 
-	encoded, err := json.MarshalIndent(g.gatherStatus(), "", "  ")
+	encoded, err := json.MarshalIndent(g.gatherStatus(false), "", "  ")
 	if err != nil {
 		return err
 	}

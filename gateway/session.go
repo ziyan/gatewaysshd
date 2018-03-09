@@ -100,9 +100,9 @@ func (s *Session) handleRequest(request *ssh.Request) {
 
 		var status map[string]interface{}
 		if !s.connection.admin {
-			status = s.connection.gatherStatus()
+			status = s.connection.gatherStatus(true)
 		} else {
-			status = s.connection.gateway.gatherStatus()
+			status = s.connection.gateway.gatherStatus(true)
 		}
 
 		encoded, err := json.MarshalIndent(status, "", "  ")
