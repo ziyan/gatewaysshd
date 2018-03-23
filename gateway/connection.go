@@ -195,14 +195,9 @@ func (c *Connection) Services() map[string][]uint16 {
 
 func (c *Connection) reportStatus(status json.RawMessage) {
 	c.lock.Lock()
-	defer c.lock.Unlock()
+	c.lock.Unlock()
 
 	c.status = status
-
-	// save a copy of the status on disk
-	if err := c.writeStatus(); err != nil {
-		log.Warningf("failed to write status for %s: %s", c.user, err)
-	}
 }
 
 func (c *Connection) writeStatus() error {
@@ -210,7 +205,7 @@ func (c *Connection) writeStatus() error {
 		return nil
 	}
 
-	encoded, err := json.MarshalIndent(c.status, "", "  ")
+	encoded, err := json.MarshalIndent(c.gatherStatus(true), "", "  ")
 	if err != nil {
 		return err
 	}

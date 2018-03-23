@@ -136,6 +136,12 @@ func (s *Session) handleRequest(request *ssh.Request) {
 			break
 		}
 		s.connection.reportStatus(status)
+
+		// save a copy of the status on disk
+		if err := s.connection.writeStatus(); err != nil {
+			log.Warningf("failed to write status for %s: %s", s.connection.user, err)
+			break
+		}
 	}
 }
 
