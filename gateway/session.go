@@ -124,6 +124,12 @@ func (s *Session) handleRequest(request *ssh.Request) {
 	case "exec":
 		defer s.Close()
 
+        // send response
+		if _, err := s.Write([]byte("{}\n")); err != nil {
+			log.Warningf("failed to send status: %s", err)
+			break
+		}
+
 		r, err := unmarshalExecuteRequest(request.Payload)
 		if err != nil {
 			log.Warningf("invalid payload: %s", err)
