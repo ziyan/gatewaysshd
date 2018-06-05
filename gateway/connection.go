@@ -36,6 +36,7 @@ type Connection struct {
 	bytesWritten   uint64
 	admin          bool
 	status         json.RawMessage
+	location       map[string]interface{}
 }
 
 func newConnection(gateway *Gateway, conn *ssh.ServerConn) (*Connection, error) {
@@ -57,6 +58,7 @@ func newConnection(gateway *Gateway, conn *ssh.ServerConn) (*Connection, error) 
 		created:    time.Now(),
 		used:       time.Now(),
 		admin:      admin,
+		location:   lookupLocation(gateway.geoipDatabase, conn.RemoteAddr().(*net.TCPAddr).IP),
 	}, nil
 }
 
@@ -269,6 +271,7 @@ func (c *Connection) gatherStatus(includeReportedStatus bool) map[string]interfa
 		"user":            c.user,
 		"admin":           c.admin,
 		"address":         c.remoteAddr.String(),
+		"location":        c.location,
 		"sessions":        sessions,
 		"sessions_closed": c.sessionsClosed,
 		"tunnels":         tunnels,

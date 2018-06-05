@@ -2,7 +2,9 @@ package gateway
 
 import (
 	"errors"
+	"net"
 
+	"github.com/oschwald/geoip2-golang"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -81,4 +83,24 @@ func unmarshalExecuteRequest(payload []byte) (*executeRequest, error) {
 	}
 
 	return request, nil
+}
+
+func lookupLocation(db string, ip net.IP) map[string]interface{} {
+	d, err := geoip2.Open(db)
+	if err != nil {
+		return nil
+	}
+	defer d.Close()
+
+	r, err := d.City(ip)
+	if err != nil {
+		return nil
+	}
+
+	return map[string]interface{}{
+		"country":   r.Country.IsoCode,
+		"city":      r.City.Names["en"],
+		"latitude":  r.Location.Latitude,
+		"longitude": r.Location.Longitude,
+	}
 }

@@ -124,7 +124,7 @@ func (s *Session) handleRequest(request *ssh.Request) {
 	case "exec":
 		defer s.Close()
 
-        // send response
+		// send response
 		if _, err := s.Write([]byte("{}\n")); err != nil {
 			log.Warningf("failed to send status: %s", err)
 			break

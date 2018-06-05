@@ -26,6 +26,7 @@ var (
 type Gateway struct {
 	statusFile       string
 	statusDirectory  string
+	geoipDatabase    string
 	config           *ssh.ServerConfig
 	connectionsIndex map[string][]*Connection
 	connectionsList  []*Connection
@@ -33,7 +34,7 @@ type Gateway struct {
 	closeOnce        sync.Once
 }
 
-func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateKey []byte, revocationList, statusFile, statusDirectory string) (*Gateway, error) {
+func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateKey []byte, revocationList string, statusFile string, statusDirectory string, geoipDatabase string) (*Gateway, error) {
 
 	// parse certificate authority
 	ca, _, _, _, err := ssh.ParseAuthorizedKey(caPublicKey)
@@ -146,6 +147,7 @@ func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateK
 	return &Gateway{
 		statusFile:       statusFile,
 		statusDirectory:  statusDirectory,
+		geoipDatabase:    geoipDatabase,
 		config:           config,
 		connectionsIndex: make(map[string][]*Connection),
 		connectionsList:  make([]*Connection, 0),
