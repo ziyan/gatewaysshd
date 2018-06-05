@@ -97,10 +97,27 @@ func lookupLocation(db string, ip net.IP) map[string]interface{} {
 		return nil
 	}
 
-	return map[string]interface{}{
+	if r.Country.IsoCode == "" {
+		return nil
+	}
+
+	if r.Location.Latitude == 0 && r.Location.Longitude == 0 {
+		return nil
+	}
+
+	location := map[string]interface{}{
 		"country":   r.Country.IsoCode,
-		"city":      r.City.Names["en"],
 		"latitude":  r.Location.Latitude,
 		"longitude": r.Location.Longitude,
 	}
+	if r.City.Names["en"] != "" {
+		location["city"] = r.City.Names["en"]
+	}
+	if r.Location.TimeZone != "" {
+		location["timezone"] = r.Location.TimeZone
+	}
+	if len(r.Subdivisions) > 0 && r.Subdivisions[0].Names["en"] != "" {
+		location["subdivision"] = r.Subdivisions[0].Names["en"]
+	}
+	return location
 }
