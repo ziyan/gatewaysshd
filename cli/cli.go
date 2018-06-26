@@ -171,9 +171,8 @@ func Run(args []string) {
 			select {
 			case <-signaling:
 				quit = true
-			case <-time.After(30 * time.Second):
-				gateway.ScavengeConnections(idleTimeout)
 			case <-time.After(3 * time.Second):
+				gateway.ScavengeConnections(idleTimeout)
 				gateway.WriteStatus()
 			}
 		}
