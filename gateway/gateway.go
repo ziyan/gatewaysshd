@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/op/go-logging"
-	"github.com/oschwald/geoip2-golang"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -24,7 +23,7 @@ var (
 )
 
 type Gateway struct {
-	geoip            *geoip2.Reader
+	geoipDatabase    string
 	config           *ssh.ServerConfig
 	connectionsIndex map[string][]*Connection
 	connectionsList  []*Connection
@@ -142,14 +141,8 @@ func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateK
 	}
 	config.AddHostKey(host)
 
-	// geoip
-	geoip, err := geoip2.Open(geoipDatabase)
-	if err != nil {
-		log.Warningf("failed to open geoip database file %s: %s", geoipDatabase, err)
-	}
-
 	return &Gateway{
-		geoip:            geoip,
+		geoipDatabase:    geoipDatabase,
 		config:           config,
 		connectionsIndex: make(map[string][]*Connection),
 		connectionsList:  make([]*Connection, 0),
@@ -161,14 +154,6 @@ func (g *Gateway) Close() {
 	g.closeOnce.Do(func() {
 		for _, connection := range g.Connections() {
 			connection.Close()
-		}
-
-		g.lock.Lock()
-		defer g.lock.Unlock()
-
-		if g.geoip != nil {
-			g.geoip.Close()
-			g.geoip = nil
 		}
 	})
 }
@@ -182,8 +167,11 @@ func (g *Gateway) HandleConnection(c net.Conn) {
 		return
 	}
 
+	// look up connection
+	location := lookupLocation(g.geoipDatabase, conn.RemoteAddr().(*net.TCPAddr).IP)
+
 	// create a connection and handle it
-	connection, err := newConnection(g, conn)
+	connection, err := newConnection(g, conn, location)
 	if err != nil {
 		log.Errorf("failed to create connection: %s", err)
 		if err := conn.Close(); err != nil {

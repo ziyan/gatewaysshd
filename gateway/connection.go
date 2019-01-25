@@ -37,8 +37,8 @@ type Connection struct {
 	location       map[string]interface{}
 }
 
-func newConnection(gateway *Gateway, conn *ssh.ServerConn) (*Connection, error) {
-	log.Infof("new connection: user = %s, remote = %v", conn.User(), conn.RemoteAddr())
+func newConnection(gateway *Gateway, conn *ssh.ServerConn, location map[string]interface{}) (*Connection, error) {
+	log.Infof("new connection: user = %s, remote = %v, location = %v", conn.User(), conn.RemoteAddr(), location)
 
 	admin := true
 	if _, ok := conn.Permissions.Extensions["permit-port-forwarding"]; !ok {
@@ -56,7 +56,7 @@ func newConnection(gateway *Gateway, conn *ssh.ServerConn) (*Connection, error) 
 		created:    time.Now(),
 		used:       time.Now(),
 		admin:      admin,
-		location:   lookupLocation(gateway.geoip, conn.RemoteAddr().(*net.TCPAddr).IP),
+		location:   location,
 	}, nil
 }
 
