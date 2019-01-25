@@ -162,8 +162,13 @@ func (g *Gateway) Close() {
 		for _, connection := range g.Connections() {
 			connection.Close()
 		}
+
+		g.lock.Lock()
+		defer g.lock.Unlock()
+
 		if g.geoip != nil {
 			g.geoip.Close()
+			g.geoip = nil
 		}
 	})
 }

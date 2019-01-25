@@ -136,10 +136,16 @@ func Run(args []string) {
 			}
 		}()
 
+		// signal to quit
+		quit := false
+
 		// accept all connections
 		go func() {
 			for {
 				tcp, err := listener.Accept()
+				if quit {
+					return
+				}
 				if err != nil {
 					log.Warningf("failed to accept incoming tcp connection: %s", err)
 					continue
@@ -151,7 +157,6 @@ func Run(args []string) {
 		// wait till exit
 		signaling := make(chan os.Signal, 1)
 		signal.Notify(signaling, os.Interrupt)
-		quit := false
 		for !quit {
 			select {
 			case <-signaling:

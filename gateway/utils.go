@@ -86,6 +86,9 @@ func unmarshalExecuteRequest(payload []byte) (*executeRequest, error) {
 }
 
 func lookupLocation(geoip *geoip2.Reader, ip net.IP) map[string]interface{} {
+	if geoip == nil {
+		return nil
+	}
 	r, err := geoip.City(ip)
 	if err != nil {
 		return nil
