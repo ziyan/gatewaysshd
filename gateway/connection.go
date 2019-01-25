@@ -74,8 +74,7 @@ func (c *Connection) Close() {
 			log.Debugf("failed to close connection: %s", err)
 		}
 
-		bytesRead, bytesWritten, _, _ := c.usage.get()
-		log.Infof("connection closed: user = %s, remote = %v, read = %d, written = %d", c.user, c.remoteAddr, bytesRead, bytesWritten)
+		log.Infof("connection closed: user = %s, remote = %v", c.user, c.remoteAddr)
 	})
 }
 
@@ -148,8 +147,7 @@ func (c *Connection) Used() time.Time {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	_, _, _, used := c.usage.get()
-	return used
+	return c.usage.used
 }
 
 // returns the list of services this connection advertises
@@ -200,7 +198,6 @@ func (c *Connection) gatherStatus() map[string]interface{} {
 		sessions = append(sessions, session.gatherStatus())
 	}
 
-	bytesRead, bytesWritten, created, used := c.usage.get()
 	return map[string]interface{}{
 		"user":            c.user,
 		"admin":           c.admin,
@@ -210,12 +207,12 @@ func (c *Connection) gatherStatus() map[string]interface{} {
 		"sessions_closed": c.sessionsClosed,
 		"tunnels":         tunnels,
 		"tunnels_closed":  c.tunnelsClosed,
-		"created":         created.Unix(),
-		"used":            used.Unix(),
-		"up_time":         uint64(time.Since(created).Seconds()),
-		"idle_time":       uint64(time.Since(used).Seconds()),
-		"bytes_read":      bytesRead,
-		"bytes_written":   bytesWritten,
+		"created":         c.usage.created.Unix(),
+		"used":            c.usage.used.Unix(),
+		"up_time":         uint64(time.Since(c.usage.created).Seconds()),
+		"idle_time":       uint64(time.Since(c.usage.used).Seconds()),
+		"bytes_read":      c.usage.bytesRead,
+		"bytes_written":   c.usage.bytesWritten,
 		"services":        services,
 		"status":          c.status,
 	}

@@ -34,14 +34,13 @@ func newSession(connection *Connection, channel ssh.Channel, channelType string,
 // close the session
 func (s *Session) Close() {
 	s.closeOnce.Do(func() {
-		s.connection.deleteSession(s)
-
 		if err := s.channel.Close(); err != nil {
 			log.Warningf("failed to close session: %s", err)
 		}
 
-		bytesRead, bytesWritten, _, _ := s.usage.get()
-		log.Debugf("session closed: user = %s, remote = %v, type = %s, read = %d, written = %d", s.connection.user, s.connection.remoteAddr, s.channelType, bytesRead, bytesWritten)
+		log.Debugf("session closed: user = %s, remote = %v, type = %s", s.connection.user, s.connection.remoteAddr, s.channelType)
+
+		s.connection.deleteSession(s)
 	})
 }
 
@@ -145,12 +144,11 @@ func (s *Session) handleRequest(request *ssh.Request) {
 }
 
 func (s *Session) gatherStatus() map[string]interface{} {
-	bytesRead, bytesWritten, created, used := s.usage.get()
 	return map[string]interface{}{
 		"type":          s.channelType,
-		"created":       created.Unix(),
-		"used":          used.Unix(),
-		"bytes_read":    bytesRead,
-		"bytes_written": bytesWritten,
+		"created":       s.usage.created.Unix(),
+		"used":          s.usage.used.Unix(),
+		"bytes_read":    s.usage.bytesRead,
+		"bytes_written": s.usage.bytesWritten,
 	}
 }

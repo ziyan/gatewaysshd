@@ -3,7 +3,7 @@ package gateway
 import (
 	"errors"
 	"net"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/oschwald/geoip2-golang"
@@ -124,8 +124,8 @@ func lookupLocation(db string, ip net.IP) map[string]interface{} {
 }
 
 type usageStats struct {
-	lock         *sync.Mutex
-	parent       *usageStats
+	parent *usageStats
+
 	bytesRead    uint64
 	bytesWritten uint64
 	created      time.Time
@@ -134,7 +134,6 @@ type usageStats struct {
 
 func newUsage(parent *usageStats) *usageStats {
 	return &usageStats{
-		lock:    &sync.Mutex{},
 		parent:  parent,
 		created: time.Now(),
 		used:    time.Now(),
@@ -154,23 +153,17 @@ func (u *usageStats) use() {
 }
 
 func (u *usageStats) update(bytesRead, bytesWritten uint64) {
-	u.lock.Lock()
-	defer u.lock.Unlock()
-
-	u.bytesRead += bytesRead
-	u.bytesWritten += bytesWritten
+	if bytesRead > 0 {
+		atomic.AddUint64(&u.bytesRead, bytesRead)
+	}
+	if bytesWritten > 0 {
+		atomic.AddUint64(&u.bytesWritten, bytesWritten)
+	}
 	u.used = time.Now()
 
 	if u.parent != nil {
 		u.parent.update(bytesRead, bytesWritten)
 	}
-}
-
-func (u *usageStats) get() (uint64, uint64, time.Time, time.Time) {
-	u.lock.Lock()
-	defer u.lock.Unlock()
-
-	return u.bytesRead, u.bytesWritten, u.created, u.used
 }
 
 type wrappedChannel struct {

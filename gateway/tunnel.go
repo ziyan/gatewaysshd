@@ -35,14 +35,13 @@ func newTunnel(connection *Connection, channel ssh.Channel, channelType string, 
 // close the tunnel
 func (t *Tunnel) Close() {
 	t.closeOnce.Do(func() {
-		t.connection.deleteTunnel(t)
-
 		if err := t.channel.Close(); err != nil {
 			log.Warningf("failed to close tunnel: %s", err)
 		}
 
-		bytesRead, bytesWritten, _, _ := t.usage.get()
-		log.Infof("tunnel closed: user = %s, remote = %v, type = %s, metadata = %v, read = %d, written = %d", t.connection.user, t.connection.remoteAddr, t.channelType, t.metadata, bytesRead, bytesWritten)
+		log.Infof("tunnel closed: user = %s, remote = %v, type = %s, metadata = %v", t.connection.user, t.connection.remoteAddr, t.channelType, t.metadata)
+
+		t.connection.deleteTunnel(t)
 	})
 }
 
@@ -97,13 +96,12 @@ func (t *Tunnel) handleTunnel(t2 *Tunnel) {
 }
 
 func (t *Tunnel) gatherStatus() map[string]interface{} {
-	bytesRead, bytesWritten, created, used := t.usage.get()
 	status := map[string]interface{}{
 		"type":          t.channelType,
-		"created":       created.Unix(),
-		"used":          used.Unix(),
-		"bytes_read":    bytesRead,
-		"bytes_written": bytesWritten,
+		"created":       t.usage.created.Unix(),
+		"used":          t.usage.used.Unix(),
+		"bytes_read":    t.usage.bytesRead,
+		"bytes_written": t.usage.bytesWritten,
 	}
 	for k, v := range t.metadata {
 		status[k] = v
