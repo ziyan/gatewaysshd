@@ -81,16 +81,6 @@ func Run(args []string) {
 			Usage: "idle timeout",
 		},
 		cli.StringFlag{
-			Name:  "status-file",
-			Value: "status.json",
-			Usage: "file to store summary status report",
-		},
-		cli.StringFlag{
-			Name:  "status-directory",
-			Value: "status",
-			Usage: "directory to store status reports",
-		},
-		cli.StringFlag{
 			Name:  "geoip-database",
 			Value: "geoip.mmdb",
 			Usage: "path to the geoip database file",
@@ -131,7 +121,7 @@ func Run(args []string) {
 		}
 
 		// create gateway
-		gateway, err := gateway.NewGateway(c.String("server-version"), caPublicKey, hostCertificate, hostPrivateKey, c.String("revocation-list"), c.String("status-file"), c.String("status-directory"), c.String("geoip-database"))
+		gateway, err := gateway.NewGateway(c.String("server-version"), caPublicKey, hostCertificate, hostPrivateKey, c.String("revocation-list"), c.String("geoip-database"))
 		if err != nil {
 			log.Errorf("failed to create ssh gateway: %s", err)
 			return err
@@ -171,9 +161,8 @@ func Run(args []string) {
 			select {
 			case <-signaling:
 				quit = true
-			case <-time.After(3 * time.Second):
+			case <-time.After(10 * time.Second):
 				gateway.ScavengeConnections(idleTimeout)
-				gateway.WriteStatus()
 			}
 		}
 

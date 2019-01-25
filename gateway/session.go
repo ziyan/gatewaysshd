@@ -100,9 +100,9 @@ func (s *Session) handleRequest(request *ssh.Request) {
 
 		var status map[string]interface{}
 		if !s.connection.admin {
-			status = s.connection.gatherStatus(true)
+			status = s.connection.gatherStatus()
 		} else {
-			status = s.connection.gateway.gatherStatus(true)
+			status = s.connection.gateway.gatherStatus()
 		}
 
 		encoded, err := json.MarshalIndent(status, "", "  ")
@@ -142,12 +142,6 @@ func (s *Session) handleRequest(request *ssh.Request) {
 			break
 		}
 		s.connection.reportStatus(status)
-
-		// save a copy of the status on disk
-		if err := s.connection.writeStatus(); err != nil {
-			log.Warningf("failed to write status for %s: %s", s.connection.user, err)
-			break
-		}
 	}
 }
 

@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -202,34 +200,7 @@ func (c *Connection) reportStatus(status json.RawMessage) {
 	c.status = status
 }
 
-func (c *Connection) writeStatus() error {
-	if c.gateway.statusDirectory == "" {
-		return nil
-	}
-
-	encoded, err := json.MarshalIndent(c.gatherStatus(true), "", "  ")
-	if err != nil {
-		return err
-	}
-
-	filename := filepath.Join(c.gateway.statusDirectory, c.user+".json")
-	file, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	if _, err := file.Write(encoded); err != nil {
-		return err
-	}
-	if _, err := file.WriteString("\n"); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (c *Connection) gatherStatus(includeReportedStatus bool) map[string]interface{} {
+func (c *Connection) gatherStatus() map[string]interface{} {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -267,7 +238,7 @@ func (c *Connection) gatherStatus(includeReportedStatus bool) map[string]interfa
 		}
 	}
 
-	status := map[string]interface{}{
+	return map[string]interface{}{
 		"user":            c.user,
 		"admin":           c.admin,
 		"address":         c.remoteAddr.String(),
@@ -283,13 +254,8 @@ func (c *Connection) gatherStatus(includeReportedStatus bool) map[string]interfa
 		"bytes_read":      c.bytesRead,
 		"bytes_written":   c.bytesWritten,
 		"services":        services,
+		"status":          c.status,
 	}
-
-	if includeReportedStatus {
-		status["status"] = c.status
-	}
-
-	return status
 }
 
 func (c *Connection) lookupService(host string, port uint16) bool {

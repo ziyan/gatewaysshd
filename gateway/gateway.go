@@ -3,7 +3,6 @@ package gateway
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -24,8 +23,6 @@ var (
 )
 
 type Gateway struct {
-	statusFile       string
-	statusDirectory  string
 	geoipDatabase    string
 	config           *ssh.ServerConfig
 	connectionsIndex map[string][]*Connection
@@ -34,7 +31,7 @@ type Gateway struct {
 	closeOnce        sync.Once
 }
 
-func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateKey []byte, revocationList string, statusFile string, statusDirectory string, geoipDatabase string) (*Gateway, error) {
+func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateKey []byte, revocationList string, geoipDatabase string) (*Gateway, error) {
 
 	// parse certificate authority
 	ca, _, _, _, err := ssh.ParseAuthorizedKey(caPublicKey)
@@ -145,8 +142,6 @@ func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateK
 	config.AddHostKey(host)
 
 	return &Gateway{
-		statusFile:       statusFile,
-		statusDirectory:  statusDirectory,
 		geoipDatabase:    geoipDatabase,
 		config:           config,
 		connectionsIndex: make(map[string][]*Connection),
@@ -256,48 +251,16 @@ func (g *Gateway) ScavengeConnections(timeout time.Duration) {
 	}
 }
 
-func (g *Gateway) gatherStatus(includeReportedStatus bool) map[string]interface{} {
+func (g *Gateway) gatherStatus() map[string]interface{} {
 	g.lock.Lock()
 	defer g.lock.Unlock()
 
 	connections := make([]interface{}, 0, len(g.connectionsList))
 	for _, connection := range g.connectionsList {
-		connections = append(connections, connection.gatherStatus(includeReportedStatus))
+		connections = append(connections, connection.gatherStatus())
 	}
 
 	return map[string]interface{}{
 		"connections": connections,
 	}
-}
-
-func (g *Gateway) WriteStatus() {
-	if err := g.writeStatus(); err != nil {
-		log.Warningf("failed to write status: %s: %s", g.statusFile, err)
-	}
-}
-
-func (g *Gateway) writeStatus() error {
-	if g.statusFile == "" {
-		return nil
-	}
-
-	encoded, err := json.MarshalIndent(g.gatherStatus(false), "", "  ")
-	if err != nil {
-		return err
-	}
-
-	file, err := os.OpenFile(g.statusFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	if _, err := file.Write(encoded); err != nil {
-		return err
-	}
-	if _, err := file.WriteString("\n"); err != nil {
-		return err
-	}
-
-	return nil
 }
