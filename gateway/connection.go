@@ -56,7 +56,7 @@ func newConnection(gateway *Gateway, conn *ssh.ServerConn) (*Connection, error) 
 		created:    time.Now(),
 		used:       time.Now(),
 		admin:      admin,
-		location:   lookupLocation(gateway.geoipDatabase, conn.RemoteAddr().(*net.TCPAddr).IP),
+		location:   lookupLocation(gateway.geoip, conn.RemoteAddr().(*net.TCPAddr).IP),
 	}, nil
 }
 

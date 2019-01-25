@@ -10,7 +10,7 @@ gatewaysshd: $(shell find . -iname '*.go' -print)
 
 .PHONY: test
 test: build
-	go test ./...
+	go test -v ./...
 
 .PHONY: docker
 docker: test

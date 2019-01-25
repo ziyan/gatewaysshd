@@ -115,11 +115,6 @@ func Run(args []string) {
 			return err
 		}
 
-		if err := os.MkdirAll(c.String("status-directory"), 0755); err != nil {
-			log.Errorf("failed to create status directory \"%s\": %s", c.String("status-directory"), err)
-			return err
-		}
-
 		// create gateway
 		gateway, err := gateway.NewGateway(c.String("server-version"), caPublicKey, hostCertificate, hostPrivateKey, c.String("revocation-list"), c.String("geoip-database"))
 		if err != nil {

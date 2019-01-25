@@ -85,14 +85,8 @@ func unmarshalExecuteRequest(payload []byte) (*executeRequest, error) {
 	return request, nil
 }
 
-func lookupLocation(db string, ip net.IP) map[string]interface{} {
-	d, err := geoip2.Open(db)
-	if err != nil {
-		return nil
-	}
-	defer d.Close()
-
-	r, err := d.City(ip)
+func lookupLocation(geoip *geoip2.Reader, ip net.IP) map[string]interface{} {
+	r, err := geoip.City(ip)
 	if err != nil {
 		return nil
 	}

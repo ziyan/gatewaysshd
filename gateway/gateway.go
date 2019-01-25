@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/op/go-logging"
+	"github.com/oschwald/geoip2-golang"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -23,7 +24,7 @@ var (
 )
 
 type Gateway struct {
-	geoipDatabase    string
+	geoip            *geoip2.Reader
 	config           *ssh.ServerConfig
 	connectionsIndex map[string][]*Connection
 	connectionsList  []*Connection
@@ -141,8 +142,14 @@ func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateK
 	}
 	config.AddHostKey(host)
 
+	// geoip
+	geoip, err := geoip2.Open(geoipDatabase)
+	if err != nil {
+		log.Warningf("failed to open geoip database file %s: %s", geoipDatabase, err)
+	}
+
 	return &Gateway{
-		geoipDatabase:    geoipDatabase,
+		geoip:            geoip,
 		config:           config,
 		connectionsIndex: make(map[string][]*Connection),
 		connectionsList:  make([]*Connection, 0),
@@ -154,6 +161,9 @@ func (g *Gateway) Close() {
 	g.closeOnce.Do(func() {
 		for _, connection := range g.Connections() {
 			connection.Close()
+		}
+		if g.geoip != nil {
+			g.geoip.Close()
 		}
 	})
 }
