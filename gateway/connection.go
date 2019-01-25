@@ -15,6 +15,7 @@ var (
 	ErrServiceNotFound          = errors.New("gatewaysshd: service not found")
 )
 
+// a ssh connection
 type Connection struct {
 	gateway        *Gateway
 	conn           *ssh.ServerConn
@@ -28,10 +29,7 @@ type Connection struct {
 	services       map[string]map[uint16]bool
 	lock           *sync.Mutex
 	closeOnce      sync.Once
-	created        time.Time
-	used           time.Time
-	bytesRead      uint64
-	bytesWritten   uint64
+	usage          *usageStats
 	admin          bool
 	status         json.RawMessage
 	location       map[string]interface{}
@@ -53,13 +51,13 @@ func newConnection(gateway *Gateway, conn *ssh.ServerConn, location map[string]i
 		localAddr:  conn.LocalAddr(),
 		services:   make(map[string]map[uint16]bool),
 		lock:       &sync.Mutex{},
-		created:    time.Now(),
-		used:       time.Now(),
+		usage:      newUsage(nil),
 		admin:      admin,
 		location:   location,
 	}, nil
 }
 
+// close the ssh connection
 func (c *Connection) Close() {
 	c.closeOnce.Do(func() {
 		c.gateway.deleteConnection(c)
@@ -76,10 +74,12 @@ func (c *Connection) Close() {
 			log.Debugf("failed to close connection: %s", err)
 		}
 
-		log.Infof("connection closed: user = %s, remote = %v, read = %d, written = %d", c.user, c.remoteAddr, c.bytesRead, c.bytesWritten)
+		bytesRead, bytesWritten, _, _ := c.usage.get()
+		log.Infof("connection closed: user = %s, remote = %v, read = %d, written = %d", c.user, c.remoteAddr, bytesRead, bytesWritten)
 	})
 }
 
+// sessions within a ssh connection
 func (c *Connection) Sessions() []*Session {
 	c.lock.Lock()
 	defer c.lock.Unlock()
@@ -108,16 +108,10 @@ func (c *Connection) deleteSession(s *Session) {
 		}
 	}
 	c.sessions = sessions
-
-	// keep stats
-	if s.used.After(c.used) {
-		c.used = s.used
-	}
-	c.bytesRead += s.bytesRead
-	c.bytesWritten += s.bytesWritten
 	c.sessionsClosed += 1
 }
 
+// tunnels within a ssh connection
 func (c *Connection) Tunnels() []*Tunnel {
 	c.lock.Lock()
 	defer c.lock.Unlock()
@@ -146,37 +140,19 @@ func (c *Connection) deleteTunnel(t *Tunnel) {
 		}
 	}
 	c.tunnels = tunnels
-
-	// keep stats
-	if t.used.After(c.used) {
-		c.used = t.used
-	}
-	c.bytesRead += t.bytesRead
-	c.bytesWritten += t.bytesWritten
 	c.tunnelsClosed += 1
 }
 
+// returns the last used time of the connection
 func (c *Connection) Used() time.Time {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	used := c.used
-
-	for _, tunnel := range c.tunnels {
-		if tunnel.used.After(used) {
-			used = tunnel.used
-		}
-	}
-
-	for _, session := range c.sessions {
-		if session.used.After(used) {
-			used = session.used
-		}
-	}
-
+	_, _, _, used := c.usage.get()
 	return used
 }
 
+// returns the list of services this connection advertises
 func (c *Connection) Services() map[string][]uint16 {
 	c.lock.Lock()
 	defer c.lock.Unlock()
@@ -214,30 +190,17 @@ func (c *Connection) gatherStatus() map[string]interface{} {
 		}
 	}
 
-	used := c.used
-	bytesRead := c.bytesRead
-	bytesWritten := c.bytesWritten
-
 	tunnels := make([]interface{}, 0, len(c.tunnels))
 	for _, tunnel := range c.tunnels {
 		tunnels = append(tunnels, tunnel.gatherStatus())
-		bytesRead += tunnel.bytesRead
-		bytesWritten += tunnel.bytesWritten
-		if tunnel.used.After(used) {
-			used = tunnel.used
-		}
 	}
 
 	sessions := make([]interface{}, 0, len(c.sessions))
 	for _, session := range c.sessions {
 		sessions = append(sessions, session.gatherStatus())
-		bytesRead += session.bytesRead
-		bytesWritten += session.bytesWritten
-		if session.used.After(used) {
-			used = session.used
-		}
 	}
 
+	bytesRead, bytesWritten, created, used := c.usage.get()
 	return map[string]interface{}{
 		"user":            c.user,
 		"admin":           c.admin,
@@ -247,12 +210,12 @@ func (c *Connection) gatherStatus() map[string]interface{} {
 		"sessions_closed": c.sessionsClosed,
 		"tunnels":         tunnels,
 		"tunnels_closed":  c.tunnelsClosed,
-		"created":         c.created.Unix(),
-		"used":            c.used.Unix(),
-		"up_time":         uint64(time.Since(c.created).Seconds()),
-		"idle_time":       uint64(time.Since(c.used).Seconds()),
-		"bytes_read":      c.bytesRead,
-		"bytes_written":   c.bytesWritten,
+		"created":         created.Unix(),
+		"used":            used.Unix(),
+		"up_time":         uint64(time.Since(created).Seconds()),
+		"idle_time":       uint64(time.Since(used).Seconds()),
+		"bytes_read":      bytesRead,
+		"bytes_written":   bytesWritten,
 		"services":        services,
 		"status":          c.status,
 	}
@@ -297,7 +260,8 @@ func (c *Connection) deregisterService(host string, port uint16) error {
 	return nil
 }
 
-func (c *Connection) Handle(requests <-chan *ssh.Request, channels <-chan ssh.NewChannel) {
+// handle requests and channels on this connection
+func (c *Connection) handle(requests <-chan *ssh.Request, channels <-chan ssh.NewChannel) {
 	go c.handleRequests(requests)
 	go c.handleChannels(channels)
 }
@@ -306,7 +270,7 @@ func (c *Connection) handleRequests(requests <-chan *ssh.Request) {
 	defer c.Close()
 
 	for request := range requests {
-		c.used = time.Now()
+		c.usage.use()
 		go c.handleRequest(request)
 	}
 }
@@ -315,7 +279,7 @@ func (c *Connection) handleChannels(channels <-chan ssh.NewChannel) {
 	defer c.Close()
 
 	for channel := range channels {
-		c.used = time.Now()
+		c.usage.use()
 		go c.handleChannel(channel)
 	}
 }
@@ -418,7 +382,7 @@ func (c *Connection) handleSessionChannel(newChannel ssh.NewChannel) (bool, ssh.
 	c.addSession(session)
 
 	// no failure
-	session.Handle(requests)
+	session.handle(requests)
 
 	// do not close channel on exit
 	channel = nil
@@ -506,7 +470,7 @@ func (c *Connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ssh.R
 	c.addTunnel(tunnel)
 
 	// no failure
-	tunnel.Handle(requests, tunnel2)
+	tunnel.handle(requests, tunnel2)
 
 	// do not close channel on exit
 	channel = nil
@@ -537,7 +501,7 @@ func (c *Connection) openTunnel(channelType string, extraData []byte, metadata m
 	c.addTunnel(tunnel)
 
 	// no failure
-	tunnel.Handle(requests, nil)
+	tunnel.handle(requests, nil)
 
 	// do not close channel on exit
 	channel = nil

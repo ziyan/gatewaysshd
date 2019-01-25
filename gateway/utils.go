@@ -3,6 +3,8 @@ package gateway
 import (
 	"errors"
 	"net"
+	"sync"
+	"time"
 
 	"github.com/oschwald/geoip2-golang"
 	"golang.org/x/crypto/ssh"
@@ -119,4 +121,88 @@ func lookupLocation(db string, ip net.IP) map[string]interface{} {
 		location["subdivision"] = r.Subdivisions[0].Names["en"]
 	}
 	return location
+}
+
+type usageStats struct {
+	lock         *sync.Mutex
+	parent       *usageStats
+	bytesRead    uint64
+	bytesWritten uint64
+	created      time.Time
+	used         time.Time
+}
+
+func newUsage(parent *usageStats) *usageStats {
+	return &usageStats{
+		lock:    &sync.Mutex{},
+		parent:  parent,
+		created: time.Now(),
+		used:    time.Now(),
+	}
+}
+
+func (u *usageStats) read(bytesRead uint64) {
+	u.update(bytesRead, 0)
+}
+
+func (u *usageStats) write(bytesWritten uint64) {
+	u.update(0, bytesWritten)
+}
+
+func (u *usageStats) use() {
+	u.update(0, 0)
+}
+
+func (u *usageStats) update(bytesRead, bytesWritten uint64) {
+	u.lock.Lock()
+	defer u.lock.Unlock()
+
+	u.bytesRead += bytesRead
+	u.bytesWritten += bytesWritten
+	u.used = time.Now()
+
+	if u.parent != nil {
+		u.parent.update(bytesRead, bytesWritten)
+	}
+}
+
+func (u *usageStats) get() (uint64, uint64, time.Time, time.Time) {
+	u.lock.Lock()
+	defer u.lock.Unlock()
+
+	return u.bytesRead, u.bytesWritten, u.created, u.used
+}
+
+type wrappedChannel struct {
+	channel ssh.Channel
+	usage   *usageStats
+}
+
+func wrapChannel(channel ssh.Channel, usage *usageStats) *wrappedChannel {
+	return &wrappedChannel{
+		channel: channel,
+		usage:   usage,
+	}
+}
+
+// override read to keep track of data usage
+func (c *wrappedChannel) Read(data []byte) (int, error) {
+	size, err := c.channel.Read(data)
+	if err == nil {
+		c.usage.read(uint64(size))
+	}
+	return size, err
+}
+
+// override write to keep track of data usage
+func (c *wrappedChannel) Write(data []byte) (int, error) {
+	size, err := c.channel.Write(data)
+	if err == nil {
+		c.usage.write(uint64(size))
+	}
+	return size, err
+}
+
+func (c *wrappedChannel) Close() error {
+	return c.channel.Close()
 }

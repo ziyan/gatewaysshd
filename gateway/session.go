@@ -5,35 +5,33 @@ import (
 	"io"
 	"io/ioutil"
 	"sync"
-	"time"
 
 	"golang.org/x/crypto/ssh"
 )
 
+// a session within a ssh connection
 type Session struct {
-	connection   *Connection
-	channel      ssh.Channel
-	channelType  string
-	extraData    []byte
-	closeOnce    sync.Once
-	created      time.Time
-	used         time.Time
-	bytesRead    uint64
-	bytesWritten uint64
+	connection  *Connection
+	channel     *wrappedChannel
+	channelType string
+	extraData   []byte
+	closeOnce   sync.Once
+	usage       *usageStats
 }
 
 func newSession(connection *Connection, channel ssh.Channel, channelType string, extraData []byte) (*Session, error) {
 	log.Debugf("new session: user = %s, remote = %v, type = %s", connection.user, connection.remoteAddr, channelType)
+	usage := newUsage(connection.usage)
 	return &Session{
 		connection:  connection,
-		channel:     channel,
+		channel:     wrapChannel(channel, usage),
 		channelType: channelType,
 		extraData:   extraData,
-		created:     time.Now(),
-		used:        time.Now(),
+		usage:       usage,
 	}, nil
 }
 
+// close the session
 func (s *Session) Close() {
 	s.closeOnce.Do(func() {
 		s.connection.deleteSession(s)
@@ -42,11 +40,12 @@ func (s *Session) Close() {
 			log.Warningf("failed to close session: %s", err)
 		}
 
-		log.Debugf("session closed: user = %s, remote = %v, type = %s, read = %d, written = %d", s.connection.user, s.connection.remoteAddr, s.channelType, s.bytesRead, s.bytesWritten)
+		bytesRead, bytesWritten, _, _ := s.usage.get()
+		log.Debugf("session closed: user = %s, remote = %v, type = %s, read = %d, written = %d", s.connection.user, s.connection.remoteAddr, s.channelType, bytesRead, bytesWritten)
 	})
 }
 
-func (s *Session) Handle(requests <-chan *ssh.Request) {
+func (s *Session) handle(requests <-chan *ssh.Request) {
 	go s.handleRequests(requests)
 	go s.handleChannel()
 }
@@ -54,14 +53,14 @@ func (s *Session) Handle(requests <-chan *ssh.Request) {
 func (s *Session) handleChannel() {
 	defer s.Close()
 
-	io.Copy(ioutil.Discard, s)
+	io.Copy(ioutil.Discard, s.channel)
 }
 
 func (s *Session) handleRequests(requests <-chan *ssh.Request) {
 	defer s.Close()
 
 	for request := range requests {
-		s.used = time.Now()
+		s.usage.use()
 		go s.handleRequest(request)
 	}
 }
@@ -111,12 +110,12 @@ func (s *Session) handleRequest(request *ssh.Request) {
 			break
 		}
 
-		if _, err := s.Write(encoded); err != nil {
+		if _, err := s.channel.Write(encoded); err != nil {
 			log.Warningf("failed to send status: %s", err)
 			break
 		}
 
-		if _, err := s.Write([]byte("\n")); err != nil {
+		if _, err := s.channel.Write([]byte("\n")); err != nil {
 			log.Warningf("failed to send status: %s", err)
 			break
 		}
@@ -125,7 +124,7 @@ func (s *Session) handleRequest(request *ssh.Request) {
 		defer s.Close()
 
 		// send response
-		if _, err := s.Write([]byte("{}\n")); err != nil {
+		if _, err := s.channel.Write([]byte("{}\n")); err != nil {
 			log.Warningf("failed to send status: %s", err)
 			break
 		}
@@ -146,25 +145,12 @@ func (s *Session) handleRequest(request *ssh.Request) {
 }
 
 func (s *Session) gatherStatus() map[string]interface{} {
+	bytesRead, bytesWritten, created, used := s.usage.get()
 	return map[string]interface{}{
 		"type":          s.channelType,
-		"created":       s.created.Unix(),
-		"used":          s.used.Unix(),
-		"bytes_read":    s.bytesRead,
-		"bytes_written": s.bytesWritten,
+		"created":       created.Unix(),
+		"used":          used.Unix(),
+		"bytes_read":    bytesRead,
+		"bytes_written": bytesWritten,
 	}
-}
-
-func (s *Session) Read(data []byte) (int, error) {
-	size, err := s.channel.Read(data)
-	s.bytesRead += uint64(size)
-	s.used = time.Now()
-	return size, err
-}
-
-func (s *Session) Write(data []byte) (int, error) {
-	size, err := s.channel.Write(data)
-	s.bytesWritten += uint64(size)
-	s.used = time.Now()
-	return size, err
 }

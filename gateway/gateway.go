@@ -22,6 +22,7 @@ var (
 	ErrInvalidCertificate = errors.New("gatewaysshd: invalid certificate")
 )
 
+// an instance of gateway, contains runtime states
 type Gateway struct {
 	geoipDatabase    string
 	config           *ssh.ServerConfig
@@ -31,6 +32,7 @@ type Gateway struct {
 	closeOnce        sync.Once
 }
 
+// creates a new instance of gateway
 func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateKey []byte, revocationList string, geoipDatabase string) (*Gateway, error) {
 
 	// parse certificate authority
@@ -150,6 +152,7 @@ func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateK
 	}, nil
 }
 
+// close the gateway instance
 func (g *Gateway) Close() {
 	g.closeOnce.Do(func() {
 		for _, connection := range g.Connections() {
@@ -158,6 +161,7 @@ func (g *Gateway) Close() {
 	})
 }
 
+// handle an incoming ssh connection
 func (g *Gateway) HandleConnection(c net.Conn) {
 	log.Infof("new tcp connection: remote = %s, local = %s", c.RemoteAddr(), c.LocalAddr())
 
@@ -181,7 +185,7 @@ func (g *Gateway) HandleConnection(c net.Conn) {
 	}
 	g.addConnection(connection)
 
-	connection.Handle(requests, channels)
+	connection.handle(requests, channels)
 }
 
 // add connection to the list of connections
@@ -235,6 +239,7 @@ func (g *Gateway) lookupConnectionService(host string, port uint16) (*Connection
 	return nil, "", 0
 }
 
+// returns a list of connections
 func (g *Gateway) Connections() []*Connection {
 	g.lock.Lock()
 	defer g.lock.Unlock()
@@ -244,6 +249,7 @@ func (g *Gateway) Connections() []*Connection {
 	return connections
 }
 
+// scavenge timed out connections
 func (g *Gateway) ScavengeConnections(timeout time.Duration) {
 	for _, connection := range g.Connections() {
 		idle := time.Since(connection.Used())

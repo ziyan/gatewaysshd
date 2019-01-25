@@ -85,6 +85,11 @@ func Run(args []string) {
 			Value: "geoip.mmdb",
 			Usage: "path to the geoip database file",
 		},
+		cli.StringFlag{
+			Name:  "database",
+			Value: "database.db",
+			Usage: "path to database file",
+		},
 	}
 
 	app.Action = func(c *cli.Context) error {
@@ -114,6 +119,14 @@ func Run(args []string) {
 			log.Errorf("failed to parse idle timeout \"%s\": %s", c.String("idle-timeout"), err)
 			return err
 		}
+
+		// open database
+		database, err := gateway.OpenDatabase(c.String("database"))
+		if err != nil {
+			log.Errorf("failed to open database %s: %s", c.String("database"), err)
+			return err
+		}
+		defer database.Close()
 
 		// create gateway
 		gateway, err := gateway.NewGateway(c.String("server-version"), caPublicKey, hostCertificate, hostPrivateKey, c.String("revocation-list"), c.String("geoip-database"))
