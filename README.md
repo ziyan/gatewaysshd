@@ -1,7 +1,7 @@
 [![Build Status](https://travis-ci.org/ziyan/gatewaysshd.svg?branch=master)](https://travis-ci.org/ziyan/gatewaysshd)
 
 What is `gatewaysshd`?
-===========
+======================
 
 `gatewaysshd` is a daemon that provides a meeting place for all your SSH tunnels. It is especially useful if you have many hard-to-reach machines running behind firewalls and you want to access services running on them over SSH from anywhere in the world.
 
@@ -55,6 +55,23 @@ $ ssh -T username@gateway
 When you remote forward a local port, `gatewaysshd` does not actually open the port on the server side. The ports you specified is a virtual concept for `gatewaysshd`. It simply keeps track of forwarded ports and internally connect and tunnel the ports when requested by another client. This relieves you the burden of assigning managing ports on the server side.
 
 You also specifies a service name for the remote forwarded port, `ssh` or `web` for example. When connecting to these services from another client, they can be referred to as `service.username` just like a normal hostname.
+
+
+Build
+=====
+
+```bash
+# format code
+gofmt -l -w gateway cli
+
+# build and strip executable
+CGO_ENABLED=0 go build github.com/ziyan/gatewaysshd
+objcopy --strip-all gatewaysshd
+
+# build docker image
+docker build -t ziyan/gatewaysshd .
+```
+
 
 Key Management
 ==============
