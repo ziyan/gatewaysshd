@@ -33,14 +33,19 @@ type Gateway struct {
 }
 
 // creates a new instance of gateway
-func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateKey []byte, revocationList string, geoipDatabase string) (*Gateway, error) {
+func NewGateway(serverVersion string, caPublicKeys, hostCertificate, hostPrivateKey []byte, revocationList string, geoipDatabase string) (*Gateway, error) {
 
 	// parse certificate authority
-	ca, _, _, _, err := ssh.ParseAuthorizedKey(caPublicKey)
-	if err != nil {
-		return nil, err
+	var cas []ssh.PublicKey
+	for len(caPublicKeys) > 0 {
+		ca, _, _, rest, err := ssh.ParseAuthorizedKey(caPublicKeys)
+		if err != nil {
+			return nil, err
+		}
+		log.Debugf("auth: ca_public_key = %v", ca)
+		cas = append(cas, ca)
+		caPublicKeys = rest
 	}
-	log.Debugf("auth: ca_public_key = %v", ca)
 
 	// parse host certificate
 	parsed, _, _, _, err := ssh.ParseAuthorizedKey(hostCertificate)
@@ -73,8 +78,10 @@ func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateK
 	// create checker
 	checker := &ssh.CertChecker{
 		IsUserAuthority: func(key ssh.PublicKey) bool {
-			if bytes.Compare(ca.Marshal(), key.Marshal()) == 0 {
-				return true
+			for _, ca := range cas {
+				if bytes.Compare(ca.Marshal(), key.Marshal()) == 0 {
+					return true
+				}
 			}
 			log.Errorf("auth: unknown authority: %v", key)
 			return false
@@ -134,7 +141,23 @@ func NewGateway(serverVersion string, caPublicKey, hostCertificate, hostPrivateK
 		PublicKeyCallback: func(meta ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 			permissions, err := checker.Authenticate(meta, key)
 			log.Debugf("auth: remote = %s, local = %s, public_key = %v, permissions = %v, err = %v", meta.RemoteAddr(), meta.LocalAddr(), key, permissions, err)
-			return permissions, err
+			if err != nil {
+				return nil, err
+			}
+
+			// only the first ca is allowed to pass down permissions
+			cert, ok := key.(*ssh.Certificate)
+			if ok {
+				for _, ca := range cas {
+					if bytes.Compare(ca.Marshal(), cert.SignatureKey.Marshal()) == 0 {
+						return permissions, nil
+					}
+					break
+				}
+			}
+
+			// return empty permission
+			return &ssh.Permissions{}, nil
 		},
 		AuthLogCallback: func(meta ssh.ConnMetadata, method string, err error) {
 			log.Debugf("auth: remote = %s, local = %s, method = %s, error = %v", meta.RemoteAddr(), meta.LocalAddr(), method, err)
