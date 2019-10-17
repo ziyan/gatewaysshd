@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"io/ioutil"
@@ -12,28 +13,33 @@ import (
 // a session within a ssh connection
 type Session struct {
 	connection  *Connection
-	channel     *wrappedChannel
+	channel     ssh.Channel
 	channelType string
 	extraData   []byte
 	closeOnce   sync.Once
-	usage       *usageStats
 }
 
 func newSession(connection *Connection, channel ssh.Channel, channelType string, extraData []byte) (*Session, error) {
 	log.Debugf("new session: user = %s, remote = %v, type = %s", connection.user, connection.remoteAddr, channelType)
-	usage := newUsage(connection.usage)
 	return &Session{
 		connection:  connection,
-		channel:     wrapChannel(channel, usage),
+		channel:     channel,
 		channelType: channelType,
 		extraData:   extraData,
-		usage:       usage,
 	}, nil
 }
 
 // close the session
 func (s *Session) Close() {
 	s.closeOnce.Do(func() {
+		if err := s.channel.CloseWrite(); err != nil {
+			log.Warningf("failed to close session: %s", err)
+		}
+
+		if _, err := s.channel.SendRequest("exit-status", false, []byte{0, 0, 0, 0}); err != nil {
+			log.Warningf("failed to send exit-status for session: %s", err)
+		}
+
 		if err := s.channel.Close(); err != nil {
 			log.Warningf("failed to close session: %s", err)
 		}
@@ -59,7 +65,6 @@ func (s *Session) handleRequests(requests <-chan *ssh.Request) {
 	defer s.Close()
 
 	for request := range requests {
-		s.usage.use()
 		go s.handleRequest(request)
 	}
 }
@@ -139,16 +144,15 @@ func (s *Session) handleRequest(request *ssh.Request) {
 			log.Warningf("failed to unmarshal json: %s", err)
 			break
 		}
-		s.connection.reportStatus(status)
+
+		if !bytes.Equal(status, []byte("null")) {
+			s.connection.reportStatus(status)
+		}
 	}
 }
 
 func (s *Session) gatherStatus() map[string]interface{} {
 	return map[string]interface{}{
-		"type":          s.channelType,
-		"created":       s.usage.created.Unix(),
-		"used":          s.usage.used.Unix(),
-		"bytes_read":    s.usage.bytesRead,
-		"bytes_written": s.usage.bytesWritten,
+		"type": s.channelType,
 	}
 }

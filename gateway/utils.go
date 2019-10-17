@@ -124,17 +124,14 @@ func lookupLocation(db string, ip net.IP) map[string]interface{} {
 }
 
 type usageStats struct {
-	parent *usageStats
-
 	bytesRead    uint64
 	bytesWritten uint64
 	created      time.Time
 	used         time.Time
 }
 
-func newUsage(parent *usageStats) *usageStats {
+func newUsage() *usageStats {
 	return &usageStats{
-		parent:  parent,
 		created: time.Now(),
 		used:    time.Now(),
 	}
@@ -160,27 +157,23 @@ func (u *usageStats) update(bytesRead, bytesWritten uint64) {
 		atomic.AddUint64(&u.bytesWritten, bytesWritten)
 	}
 	u.used = time.Now()
-
-	if u.parent != nil {
-		u.parent.update(bytesRead, bytesWritten)
-	}
 }
 
-type wrappedChannel struct {
-	channel ssh.Channel
-	usage   *usageStats
+type wrappedConn struct {
+	conn  net.Conn
+	usage *usageStats
 }
 
-func wrapChannel(channel ssh.Channel, usage *usageStats) *wrappedChannel {
-	return &wrappedChannel{
-		channel: channel,
-		usage:   usage,
+func wrapConn(conn net.Conn, usage *usageStats) *wrappedConn {
+	return &wrappedConn{
+		conn:  conn,
+		usage: usage,
 	}
 }
 
 // override read to keep track of data usage
-func (c *wrappedChannel) Read(data []byte) (int, error) {
-	size, err := c.channel.Read(data)
+func (c *wrappedConn) Read(data []byte) (int, error) {
+	size, err := c.conn.Read(data)
 	if err == nil {
 		c.usage.read(uint64(size))
 	}
@@ -188,14 +181,34 @@ func (c *wrappedChannel) Read(data []byte) (int, error) {
 }
 
 // override write to keep track of data usage
-func (c *wrappedChannel) Write(data []byte) (int, error) {
-	size, err := c.channel.Write(data)
+func (c *wrappedConn) Write(data []byte) (int, error) {
+	size, err := c.conn.Write(data)
 	if err == nil {
 		c.usage.write(uint64(size))
 	}
 	return size, err
 }
 
-func (c *wrappedChannel) Close() error {
-	return c.channel.Close()
+func (c *wrappedConn) Close() error {
+	return c.conn.Close()
+}
+
+func (c *wrappedConn) LocalAddr() net.Addr {
+	return c.conn.LocalAddr()
+}
+
+func (c *wrappedConn) RemoteAddr() net.Addr {
+	return c.conn.RemoteAddr()
+}
+
+func (c *wrappedConn) SetDeadline(t time.Time) error {
+	return c.conn.SetDeadline(t)
+}
+
+func (c *wrappedConn) SetReadDeadline(t time.Time) error {
+	return c.conn.SetReadDeadline(t)
+}
+
+func (c *wrappedConn) SetWriteDeadline(t time.Time) error {
+	return c.conn.SetWriteDeadline(t)
 }

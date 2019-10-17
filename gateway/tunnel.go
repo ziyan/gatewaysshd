@@ -10,24 +10,21 @@ import (
 // a tunnel within a ssh connection
 type Tunnel struct {
 	connection  *Connection
-	channel     *wrappedChannel
+	channel     ssh.Channel
 	channelType string
 	extraData   []byte
 	active      bool
 	closeOnce   sync.Once
-	usage       *usageStats
 	metadata    map[string]interface{}
 }
 
 func newTunnel(connection *Connection, channel ssh.Channel, channelType string, extraData []byte, metadata map[string]interface{}) (*Tunnel, error) {
 	log.Infof("new tunnel: user = %s, remote = %v, type = %s, metadata = %v", connection.user, connection.remoteAddr, channelType, metadata)
-	usage := newUsage(connection.usage)
 	return &Tunnel{
 		connection:  connection,
-		channel:     wrapChannel(channel, usage),
+		channel:     channel,
 		channelType: channelType,
 		extraData:   extraData,
-		usage:       usage,
 		metadata:    metadata,
 	}, nil
 }
@@ -56,7 +53,6 @@ func (t *Tunnel) handleRequests(requests <-chan *ssh.Request) {
 	defer t.Close()
 
 	for request := range requests {
-		t.usage.use()
 		go t.handleRequest(request)
 	}
 }
@@ -97,11 +93,7 @@ func (t *Tunnel) handleTunnel(t2 *Tunnel) {
 
 func (t *Tunnel) gatherStatus() map[string]interface{} {
 	status := map[string]interface{}{
-		"type":          t.channelType,
-		"created":       t.usage.created.Unix(),
-		"used":          t.usage.used.Unix(),
-		"bytes_read":    t.usage.bytesRead,
-		"bytes_written": t.usage.bytesWritten,
+		"type": t.channelType,
 	}
 	for k, v := range t.metadata {
 		status[k] = v

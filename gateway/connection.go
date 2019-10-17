@@ -35,7 +35,7 @@ type Connection struct {
 	location       map[string]interface{}
 }
 
-func newConnection(gateway *Gateway, conn *ssh.ServerConn, location map[string]interface{}) (*Connection, error) {
+func newConnection(gateway *Gateway, conn *ssh.ServerConn, usage *usageStats, location map[string]interface{}) (*Connection, error) {
 	log.Infof("new connection: user = %s, remote = %v, location = %v", conn.User(), conn.RemoteAddr(), location)
 
 	admin := true
@@ -51,7 +51,7 @@ func newConnection(gateway *Gateway, conn *ssh.ServerConn, location map[string]i
 		localAddr:  conn.LocalAddr(),
 		services:   make(map[string]map[uint16]bool),
 		lock:       &sync.Mutex{},
-		usage:      newUsage(nil),
+		usage:      usage,
 		admin:      admin,
 		location:   location,
 	}, nil

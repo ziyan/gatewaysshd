@@ -188,17 +188,18 @@ func (g *Gateway) Close() {
 func (g *Gateway) HandleConnection(c net.Conn) {
 	log.Infof("new tcp connection: remote = %s, local = %s", c.RemoteAddr(), c.LocalAddr())
 
-	conn, channels, requests, err := ssh.NewServerConn(c, g.config)
+	usage := newUsage()
+	conn, channels, requests, err := ssh.NewServerConn(wrapConn(c, usage), g.config)
 	if err != nil {
 		log.Warningf("failed during ssh handshake: %s", err)
 		return
 	}
 
 	// look up connection
-	location := lookupLocation(g.geoipDatabase, conn.RemoteAddr().(*net.TCPAddr).IP)
+	location := lookupLocation(g.geoipDatabase, c.RemoteAddr().(*net.TCPAddr).IP)
 
 	// create a connection and handle it
-	connection, err := newConnection(g, conn, location)
+	connection, err := newConnection(g, conn, usage, location)
 	if err != nil {
 		log.Errorf("failed to create connection: %s", err)
 		if err := conn.Close(); err != nil {
