@@ -129,7 +129,7 @@ func Run(args []string) {
 		defer database.Close()
 
 		// create gateway
-		gateway, err := gateway.NewGateway(c.String("server-version"), caPublicKey, hostCertificate, hostPrivateKey, c.String("revocation-list"), c.String("geoip-database"))
+		gateway, err := gateway.NewGateway(c.String("server-version"), caPublicKey, hostCertificate, hostPrivateKey, c.String("revocation-list"), c.String("geoip-database"), database)
 		if err != nil {
 			log.Errorf("failed to create ssh gateway: %s", err)
 			return err

@@ -147,6 +147,7 @@ func (s *Session) handleRequest(request *ssh.Request) {
 
 		if !bytes.Equal(status, []byte("null")) {
 			s.connection.reportStatus(status)
+			s.connection.updateUser()
 		}
 	}
 }

@@ -25,6 +25,7 @@ var (
 // an instance of gateway, contains runtime states
 type Gateway struct {
 	geoipDatabase    string
+	database         *Database
 	config           *ssh.ServerConfig
 	connectionsIndex map[string][]*Connection
 	connectionsList  []*Connection
@@ -33,7 +34,7 @@ type Gateway struct {
 }
 
 // creates a new instance of gateway
-func NewGateway(serverVersion string, caPublicKeys, hostCertificate, hostPrivateKey []byte, revocationList string, geoipDatabase string) (*Gateway, error) {
+func NewGateway(serverVersion string, caPublicKeys, hostCertificate, hostPrivateKey []byte, revocationList string, geoipDatabase string, database *Database) (*Gateway, error) {
 
 	// parse certificate authority
 	var cas []ssh.PublicKey
@@ -168,6 +169,7 @@ func NewGateway(serverVersion string, caPublicKeys, hostCertificate, hostPrivate
 
 	return &Gateway{
 		geoipDatabase:    geoipDatabase,
+		database:         database,
 		config:           config,
 		connectionsIndex: make(map[string][]*Connection),
 		connectionsList:  make([]*Connection, 0),

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/segmentio/ksuid"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -17,6 +18,7 @@ var (
 
 // a ssh connection
 type Connection struct {
+	id             string
 	gateway        *Gateway
 	conn           *ssh.ServerConn
 	user           string
@@ -43,7 +45,8 @@ func newConnection(gateway *Gateway, conn *ssh.ServerConn, usage *usageStats, lo
 		admin = false
 	}
 
-	return &Connection{
+	connection := &Connection{
+		id:         ksuid.New().String(),
 		gateway:    gateway,
 		conn:       conn,
 		user:       conn.User(),
@@ -54,7 +57,8 @@ func newConnection(gateway *Gateway, conn *ssh.ServerConn, usage *usageStats, lo
 		usage:      usage,
 		admin:      admin,
 		location:   location,
-	}, nil
+	}
+	return connection, nil
 }
 
 // close the ssh connection
@@ -169,7 +173,7 @@ func (c *Connection) Services() map[string][]uint16 {
 
 func (c *Connection) reportStatus(status json.RawMessage) {
 	c.lock.Lock()
-	c.lock.Unlock()
+	defer c.lock.Unlock()
 
 	c.status = status
 }
@@ -199,6 +203,7 @@ func (c *Connection) gatherStatus() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
+		"id":              c.id,
 		"user":            c.user,
 		"admin":           c.admin,
 		"address":         c.remoteAddr.String(),
@@ -503,4 +508,19 @@ func (c *Connection) openTunnel(channelType string, extraData []byte, metadata m
 	// do not close channel on exit
 	channel = nil
 	return tunnel, nil
+}
+
+func (c *Connection) updateUser() {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	if err := c.gateway.database.updateUser(&userModel{
+		ID:       c.user,
+		Address:  c.remoteAddr.String(),
+		Location: c.location,
+		Status:   c.status,
+		Used:     c.usage.used.Unix(),
+	}); err != nil {
+		log.Errorf("failed to save connection in database: %s", err)
+	}
 }

@@ -1,17 +1,16 @@
 package gateway
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/boltdb/bolt"
 )
 
 var (
-	bucketUsers       = []byte("users")
-	bucketConnections = []byte("connections")
-	buckets           = [][]byte{
+	bucketUsers = []byte("users")
+	buckets     = [][]byte{
 		bucketUsers,
-		bucketConnections,
 	}
 )
 
@@ -50,10 +49,62 @@ func (d *Database) Close() error {
 }
 
 type userModel struct {
-	Name        string   `json:"name"`
-	Connections []string `json:"connections"`
+	// id of the user
+	ID string `json:"id"`
+
+	// ip address and geo location
+	Address  string                 `json:"address"`
+	Location map[string]interface{} `json:"location"`
+
+	// reported status
+	Status json.RawMessage `json:"status"`
+
+	// last used timestamp
+	Used int64 `json:"used"`
 }
 
-type connectionModel struct {
-	User string `json:"user"`
+func (d *Database) updateUser(user *userModel) error {
+	if err := d.db.Update(func(tx *bolt.Tx) error {
+		model := &userModel{
+			ID:       user.ID,
+			Address:  user.Address,
+			Location: user.Location,
+			Status:   user.Status,
+			Used:     user.Used,
+		}
+
+		// get user
+		if raw := tx.Bucket(bucketUsers).Get([]byte(user.ID)); raw != nil {
+			if err := json.Unmarshal(raw, &model); err != nil {
+				return err
+			}
+
+			// update user
+			model.ID = user.ID
+			model.Address = user.Address
+			if user.Location != nil {
+				model.Location = user.Location
+			}
+			if user.Status != nil {
+				model.Status = user.Status
+			}
+			model.Used = user.Used
+		}
+
+		// encode user
+		raw, err := json.Marshal(model)
+		if err != nil {
+			return err
+		}
+
+		// save user
+		if err := tx.Bucket(bucketUsers).Put([]byte(user.ID), raw); err != nil {
+			return err
+		}
+
+		return nil
+	}); err != nil {
+		return err
+	}
+	return nil
 }
