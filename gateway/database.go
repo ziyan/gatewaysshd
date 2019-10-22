@@ -65,13 +65,7 @@ type userModel struct {
 
 func (d *Database) updateUser(user *userModel) error {
 	if err := d.db.Update(func(tx *bolt.Tx) error {
-		model := &userModel{
-			ID:       user.ID,
-			Address:  user.Address,
-			Location: user.Location,
-			Status:   user.Status,
-			Used:     user.Used,
-		}
+		var model *userModel
 
 		// get user
 		if raw := tx.Bucket(bucketUsers).Get([]byte(user.ID)); raw != nil {
@@ -89,6 +83,8 @@ func (d *Database) updateUser(user *userModel) error {
 				model.Status = user.Status
 			}
 			model.Used = user.Used
+		} else {
+			model = user
 		}
 
 		// encode user
