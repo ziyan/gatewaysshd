@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"encoding/json"
 	"io/ioutil"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"time"
@@ -49,6 +51,11 @@ func Run(args []string) {
 			Name:  "listen",
 			Value: ":2020",
 			Usage: "listen endpoint",
+		},
+		cli.StringFlag{
+			Name:  "http-listen",
+			Value: ":2080",
+			Usage: "http listen endpoint",
 		},
 		cli.StringFlag{
 			Name:  "ca-public-key",
@@ -153,7 +160,9 @@ func Run(args []string) {
 		quit := false
 
 		// accept all connections
+		accepting := make(chan struct{})
 		go func() {
+			defer close(accepting)
 			for {
 				tcp, err := listener.Accept()
 				if quit {
@@ -161,9 +170,53 @@ func Run(args []string) {
 				}
 				if err != nil {
 					log.Warningf("failed to accept incoming tcp connection: %s", err)
-					continue
+					break
 				}
 				go gateway.HandleConnection(tcp)
+			}
+		}()
+
+		// serve http
+		httping := make(chan struct{})
+		go func() {
+			defer close(httping)
+
+			wrapHandler := func(handler func(*http.Request) (interface{}, error)) func(http.ResponseWriter, *http.Request) {
+				return func(response http.ResponseWriter, request *http.Request) {
+					result, err := handler(request)
+					if err != nil {
+						log.Errorf("failed to handle request: %s", err)
+						http.Error(response, "500 internal server error", http.StatusInternalServerError)
+						return
+					}
+
+					raw, err := json.Marshal(result)
+					if err != nil {
+						log.Errorf("failed to encode json: %s", err)
+						http.Error(response, "500 internal server error", http.StatusInternalServerError)
+						return
+					}
+
+					response.Header().Set("Content-Type", "application/json; charset=utf-8")
+					response.Write(raw)
+				}
+			}
+
+			mux := http.NewServeMux()
+			mux.HandleFunc("/api/users", wrapHandler(func(request *http.Request) (interface{}, error) {
+				return gateway.ListUsers()
+			}))
+			mux.HandleFunc("/api/connections", wrapHandler(func(request *http.Request) (interface{}, error) {
+				return gateway.ListConnections()
+			}))
+
+			log.Noticef("listening on %s", c.String("http-listen"))
+			err := http.ListenAndServe(c.String("http-listen"), mux)
+			if quit {
+				return
+			}
+			if err != nil {
+				log.Warningf("http server exited with error: %s", err)
 			}
 		}()
 
@@ -174,10 +227,15 @@ func Run(args []string) {
 			select {
 			case <-signaling:
 				quit = true
+			case <-accepting:
+				quit = true
+			case <-httping:
+				quit = true
 			case <-time.After(10 * time.Second):
 				gateway.ScavengeConnections(idleTimeout)
 			}
 		}
+		quit = true
 
 		log.Noticef("exiting ...")
 		return nil

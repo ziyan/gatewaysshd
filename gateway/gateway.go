@@ -299,3 +299,28 @@ func (g *Gateway) gatherStatus() map[string]interface{} {
 		"connections": connections,
 	}
 }
+
+func (g *Gateway) ListConnections() (interface{}, error) {
+	return g.gatherStatus(), nil
+}
+
+func (g *Gateway) ListUsers() (interface{}, error) {
+	models, err := g.database.listUsers()
+	if err != nil {
+		return nil, err
+	}
+
+	users := make([]interface{}, 0, len(models))
+	for _, model := range models {
+		users = append(users, map[string]interface{}{
+			"id":       model.ID,
+			"address":  model.Address,
+			"location": model.Location,
+			"status":   model.Status,
+			"used":     model.Used,
+		})
+	}
+	return map[string]interface{}{
+		"users": users,
+	}, nil
+}

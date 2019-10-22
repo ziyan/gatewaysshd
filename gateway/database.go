@@ -108,3 +108,25 @@ func (d *Database) updateUser(user *userModel) error {
 	}
 	return nil
 }
+
+func (d *Database) listUsers() ([]*userModel, error) {
+	var results []*userModel
+
+	if err := d.db.View(func(tx *bolt.Tx) error {
+		cursor := tx.Bucket(bucketUsers).Cursor()
+		var models []*userModel
+		for id, raw := cursor.First(); id != nil; id, raw = cursor.Next() {
+			var model *userModel
+			if err := json.Unmarshal(raw, &model); err != nil {
+				return err
+			}
+			models = append(models, model)
+		}
+
+		results = models
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return results, nil
+}
