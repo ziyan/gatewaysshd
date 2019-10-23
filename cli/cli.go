@@ -48,13 +48,13 @@ func Run(args []string) {
 			Usage: "log format",
 		},
 		cli.StringFlag{
-			Name:  "listen",
+			Name:  "listen-ssh",
 			Value: ":2020",
-			Usage: "listen endpoint",
+			Usage: "ssh listen endpoint",
 		},
 		cli.StringFlag{
-			Name:  "http-listen",
-			Value: ":2080",
+			Name:  "listen-http",
+			Value: "",
 			Usage: "http listen endpoint",
 		},
 		cli.StringFlag{
@@ -144,15 +144,15 @@ func Run(args []string) {
 		defer gateway.Close()
 
 		// listen
-		log.Noticef("listening on %s", c.String("listen"))
-		listener, err := net.Listen("tcp", c.String("listen"))
+		log.Noticef("listening for ssh connection on %s", c.String("listen-ssh"))
+		listener, err := net.Listen("tcp", c.String("listen-ssh"))
 		if err != nil {
-			log.Errorf("failed to listen on \"%s\": %s", c.String("listen"), err)
+			log.Errorf("failed to listen on \"%s\": %s", c.String("listen-ssh"), err)
 			return err
 		}
 		defer func() {
 			if err := listener.Close(); err != nil {
-				log.Warningf("failed to close listener: %s", err)
+				log.Errorf("failed to close listener: %s", err)
 			}
 		}()
 
@@ -160,16 +160,16 @@ func Run(args []string) {
 		quit := false
 
 		// accept all connections
-		accepting := make(chan struct{})
+		sshing := make(chan struct{})
 		go func() {
-			defer close(accepting)
+			defer close(sshing)
 			for {
 				tcp, err := listener.Accept()
 				if quit {
 					return
 				}
 				if err != nil {
-					log.Warningf("failed to accept incoming tcp connection: %s", err)
+					log.Errorf("failed to accept incoming tcp connection: %s", err)
 					break
 				}
 				go gateway.HandleConnection(tcp)
@@ -178,47 +178,49 @@ func Run(args []string) {
 
 		// serve http
 		httping := make(chan struct{})
-		go func() {
-			defer close(httping)
+		if c.String("listen-http") != "" {
+			go func() {
+				defer close(httping)
 
-			wrapHandler := func(handler func(*http.Request) (interface{}, error)) func(http.ResponseWriter, *http.Request) {
-				return func(response http.ResponseWriter, request *http.Request) {
-					result, err := handler(request)
-					if err != nil {
-						log.Errorf("failed to handle request: %s", err)
-						http.Error(response, "500 internal server error", http.StatusInternalServerError)
-						return
+				wrapHandler := func(handler func(*http.Request) (interface{}, error)) func(http.ResponseWriter, *http.Request) {
+					return func(response http.ResponseWriter, request *http.Request) {
+						result, err := handler(request)
+						if err != nil {
+							log.Errorf("failed to handle request: %s", err)
+							http.Error(response, "500 internal server error", http.StatusInternalServerError)
+							return
+						}
+
+						raw, err := json.Marshal(result)
+						if err != nil {
+							log.Errorf("failed to encode json: %s", err)
+							http.Error(response, "500 internal server error", http.StatusInternalServerError)
+							return
+						}
+
+						response.Header().Set("Content-Type", "application/json; charset=utf-8")
+						response.Write(raw)
 					}
-
-					raw, err := json.Marshal(result)
-					if err != nil {
-						log.Errorf("failed to encode json: %s", err)
-						http.Error(response, "500 internal server error", http.StatusInternalServerError)
-						return
-					}
-
-					response.Header().Set("Content-Type", "application/json; charset=utf-8")
-					response.Write(raw)
 				}
-			}
 
-			mux := http.NewServeMux()
-			mux.HandleFunc("/api/users", wrapHandler(func(request *http.Request) (interface{}, error) {
-				return gateway.ListUsers()
-			}))
-			mux.HandleFunc("/api/connections", wrapHandler(func(request *http.Request) (interface{}, error) {
-				return gateway.ListConnections()
-			}))
+				mux := http.NewServeMux()
+				mux.HandleFunc("/api/users", wrapHandler(func(request *http.Request) (interface{}, error) {
+					return gateway.ListUsers()
+				}))
+				mux.HandleFunc("/api/connections", wrapHandler(func(request *http.Request) (interface{}, error) {
+					return gateway.ListConnections()
+				}))
 
-			log.Noticef("listening on %s", c.String("http-listen"))
-			err := http.ListenAndServe(c.String("http-listen"), mux)
-			if quit {
-				return
-			}
-			if err != nil {
-				log.Warningf("http server exited with error: %s", err)
-			}
-		}()
+				log.Noticef("listening for http connection on %s", c.String("listen-http"))
+				err := http.ListenAndServe(c.String("listen-http"), mux)
+				if quit {
+					return
+				}
+				if err != nil {
+					log.Errorf("http server exited with error: %s", err)
+				}
+			}()
+		}
 
 		// wait till exit
 		signaling := make(chan os.Signal, 1)
@@ -227,7 +229,7 @@ func Run(args []string) {
 			select {
 			case <-signaling:
 				quit = true
-			case <-accepting:
+			case <-sshing:
 				quit = true
 			case <-httping:
 				quit = true
@@ -235,7 +237,6 @@ func Run(args []string) {
 				gateway.ScavengeConnections(idleTimeout)
 			}
 		}
-		quit = true
 
 		log.Noticef("exiting ...")
 		return nil

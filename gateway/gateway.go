@@ -255,13 +255,13 @@ func (g *Gateway) lookupConnectionService(host string, port uint16) (*Connection
 
 		for _, connection := range g.connectionsIndex[user] {
 			if connection.lookupService(host, port) {
-				log.Infof("lookup: found service: user = %s, host = %s, port = %d", user, host, port)
+				log.Debugf("lookup: found service: user = %s, host = %s, port = %d", user, host, port)
 				return connection, host, port
 			}
 		}
 	}
 
-	log.Infof("lookup: failed to find service: host = %s, port = %d", host, port)
+	log.Debugf("lookup: failed to find service: host = %s, port = %d", host, port)
 	return nil, "", 0
 }
 

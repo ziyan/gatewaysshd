@@ -246,7 +246,7 @@ func (c *Connection) registerService(host string, port uint16) error {
 	}
 	c.services[host][port] = true
 
-	log.Infof("registered service: user = %s, host = %s, port = %d", c.user, host, port)
+	log.Debugf("registered service: user = %s, host = %s, port = %d", c.user, host, port)
 	return nil
 }
 
@@ -258,7 +258,7 @@ func (c *Connection) deregisterService(host string, port uint16) error {
 		delete(c.services[host], port)
 	}
 
-	log.Infof("deregistered service: user = %s, host = %s, port = %d", c.user, host, port)
+	log.Debugf("deregistered service: user = %s, host = %s, port = %d", c.user, host, port)
 	return nil
 }
 
