@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"time"
@@ -96,6 +97,10 @@ func Run(args []string) {
 			Name:  "database",
 			Value: "database.db",
 			Usage: "path to database file",
+		},
+		cli.BoolFlag{
+			Name:  "debug-pprof",
+			Usage: "enable pprof debugging",
 		},
 	}
 
@@ -210,6 +215,14 @@ func Run(args []string) {
 				mux.HandleFunc("/api/connections", wrapHandler(func(request *http.Request) (interface{}, error) {
 					return gateway.ListConnections()
 				}))
+
+				if c.Bool("debug-pprof") {
+					mux.HandleFunc("/debug/pprof/", pprof.Index)
+					mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+					mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+					mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+					mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+				}
 
 				log.Noticef("listening for http connection on %s", c.String("listen-http"))
 				err := http.ListenAndServe(c.String("listen-http"), mux)
