@@ -75,14 +75,14 @@ func (t *Tunnel) handleTunnel(t2 *Tunnel) {
 
 	done1 := make(chan struct{})
 	go func() {
+		defer close(done1)
 		io.Copy(t.channel, t2.channel)
-		close(done1)
 	}()
 
 	done2 := make(chan struct{})
 	go func() {
+		defer close(done2)
 		io.Copy(t2.channel, t.channel)
-		close(done2)
 	}()
 
 	select {

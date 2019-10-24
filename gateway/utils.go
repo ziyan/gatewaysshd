@@ -93,6 +93,8 @@ func lookupLocation(db string, ip net.IP) map[string]interface{} {
 		log.Warningf("failed to open geoip database file %s: %s", db, err)
 		return nil
 	}
+	defer d.Close()
+
 	r, err := d.City(ip)
 	if err != nil {
 		return nil
@@ -211,14 +213,4 @@ func (c *wrappedConn) SetReadDeadline(t time.Time) error {
 
 func (c *wrappedConn) SetWriteDeadline(t time.Time) error {
 	return c.conn.SetWriteDeadline(t)
-}
-
-func extractAddress(addr net.Addr) string {
-	switch a := addr.(type) {
-	case *net.UDPAddr:
-		return a.IP.String()
-	case *net.TCPAddr:
-		return a.IP.String()
-	}
-	return addr.String()
 }

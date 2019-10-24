@@ -189,13 +189,27 @@ func (g *Gateway) Close() {
 // handle an incoming ssh connection
 func (g *Gateway) HandleConnection(c net.Conn) {
 	log.Infof("new tcp connection: remote = %s, local = %s", c.RemoteAddr(), c.LocalAddr())
+	defer func() {
+		if c != nil {
+			if err := c.Close(); err != nil {
+				log.Errorf("failed to close connection: %s", err)
+			}
+		}
+	}()
 
 	usage := newUsage()
 	conn, channels, requests, err := ssh.NewServerConn(wrapConn(c, usage), g.config)
 	if err != nil {
-		log.Warningf("failed during ssh handshake: %s", err)
+		log.Errorf("failed during ssh handshake: %s", err)
 		return
 	}
+	defer func() {
+		if conn != nil {
+			if err := conn.Close(); err != nil {
+				log.Errorf("failed to close connection: %s", err)
+			}
+		}
+	}()
 
 	// look up connection
 	location := lookupLocation(g.geoipDatabase, c.RemoteAddr().(*net.TCPAddr).IP)
@@ -204,14 +218,17 @@ func (g *Gateway) HandleConnection(c net.Conn) {
 	connection, err := newConnection(g, conn, usage, location)
 	if err != nil {
 		log.Errorf("failed to create connection: %s", err)
-		if err := conn.Close(); err != nil {
-			log.Warningf("failed to close connection: %s", err)
-		}
 		return
 	}
 	g.addConnection(connection)
 
-	connection.handle(requests, channels)
+	// handle requests and channels on this connection
+	go connection.handleRequests(requests)
+	go connection.handleChannels(channels)
+
+	// don't close connection on success
+	conn = nil
+	c = nil
 }
 
 // add connection to the list of connections

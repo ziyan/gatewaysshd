@@ -262,12 +262,6 @@ func (c *Connection) deregisterService(host string, port uint16) error {
 	return nil
 }
 
-// handle requests and channels on this connection
-func (c *Connection) handle(requests <-chan *ssh.Request, channels <-chan ssh.NewChannel) {
-	go c.handleRequests(requests)
-	go c.handleChannels(channels)
-}
-
 func (c *Connection) handleRequests(requests <-chan *ssh.Request) {
 	defer c.Close()
 
