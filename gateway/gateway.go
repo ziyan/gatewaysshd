@@ -215,11 +215,7 @@ func (g *Gateway) HandleConnection(c net.Conn) {
 	location := lookupLocation(g.geoipDatabase, c.RemoteAddr().(*net.TCPAddr).IP)
 
 	// create a connection and handle it
-	connection, err := newConnection(g, conn, usage, location)
-	if err != nil {
-		log.Errorf("failed to create connection: %s", err)
-		return
-	}
+	connection := newConnection(g, conn, usage, location)
 	g.addConnection(connection)
 
 	// handle requests and channels on this connection

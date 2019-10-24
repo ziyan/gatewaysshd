@@ -19,14 +19,14 @@ type Session struct {
 	closeOnce   sync.Once
 }
 
-func newSession(connection *Connection, channel ssh.Channel, channelType string, extraData []byte) (*Session, error) {
+func newSession(connection *Connection, channel ssh.Channel, channelType string, extraData []byte) *Session {
 	log.Debugf("new session: user = %s, remote = %v, type = %s", connection.user, connection.remoteAddr, channelType)
 	return &Session{
 		connection:  connection,
 		channel:     channel,
 		channelType: channelType,
 		extraData:   extraData,
-	}, nil
+	}
 }
 
 // close the session
@@ -48,11 +48,6 @@ func (s *Session) Close() {
 
 		s.connection.deleteSession(s)
 	})
-}
-
-func (s *Session) handle(requests <-chan *ssh.Request) {
-	go s.handleRequests(requests)
-	go s.handleChannel()
 }
 
 func (s *Session) handleChannel() {

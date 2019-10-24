@@ -18,7 +18,7 @@ type Tunnel struct {
 	metadata    map[string]interface{}
 }
 
-func newTunnel(connection *Connection, channel ssh.Channel, channelType string, extraData []byte, metadata map[string]interface{}) (*Tunnel, error) {
+func newTunnel(connection *Connection, channel ssh.Channel, channelType string, extraData []byte, metadata map[string]interface{}) *Tunnel {
 	log.Infof("new tunnel: user = %s, remote = %v, type = %s, metadata = %v", connection.user, connection.remoteAddr, channelType, metadata)
 	return &Tunnel{
 		connection:  connection,
@@ -26,7 +26,7 @@ func newTunnel(connection *Connection, channel ssh.Channel, channelType string, 
 		channelType: channelType,
 		extraData:   extraData,
 		metadata:    metadata,
-	}, nil
+	}
 }
 
 // close the tunnel
@@ -40,13 +40,6 @@ func (t *Tunnel) Close() {
 
 		t.connection.deleteTunnel(t)
 	})
-}
-
-func (t *Tunnel) handle(requests <-chan *ssh.Request, t2 *Tunnel) {
-	go t.handleRequests(requests)
-	if t2 != nil {
-		go t.handleTunnel(t2)
-	}
 }
 
 func (t *Tunnel) handleRequests(requests <-chan *ssh.Request) {

@@ -37,7 +37,7 @@ type Connection struct {
 	location       map[string]interface{}
 }
 
-func newConnection(gateway *Gateway, conn *ssh.ServerConn, usage *usageStats, location map[string]interface{}) (*Connection, error) {
+func newConnection(gateway *Gateway, conn *ssh.ServerConn, usage *usageStats, location map[string]interface{}) *Connection {
 	log.Infof("new connection: user = %s, remote = %v, location = %v", conn.User(), conn.RemoteAddr(), location)
 
 	admin := true
@@ -58,7 +58,7 @@ func newConnection(gateway *Gateway, conn *ssh.ServerConn, usage *usageStats, lo
 		admin:      admin,
 		location:   location,
 	}
-	return connection, nil
+	return connection
 }
 
 // close the ssh connection
@@ -266,7 +266,6 @@ func (c *Connection) handleRequests(requests <-chan *ssh.Request) {
 	defer c.Close()
 
 	for request := range requests {
-		c.usage.use()
 		go c.handleRequest(request)
 	}
 }
@@ -275,7 +274,6 @@ func (c *Connection) handleChannels(channels <-chan ssh.NewChannel) {
 	defer c.Close()
 
 	for channel := range channels {
-		c.usage.use()
 		go c.handleChannel(channel)
 	}
 }
@@ -331,33 +329,43 @@ func (c *Connection) handleChannel(newChannel ssh.NewChannel) {
 	log.Debugf("new channel: type = %s, data = %v", newChannel.ChannelType(), newChannel.ExtraData())
 
 	ok := false
-	rejection := ssh.UnknownChannelType
+	// rejection := ssh.UnknownChannelType
+	// message := "unknown channel type"
 
 	switch newChannel.ChannelType() {
 	case "session":
-		ok, rejection = c.handleSessionChannel(newChannel)
+		ok, _, _ = c.handleSessionChannel(newChannel)
 	case "direct-tcpip":
-		ok, rejection = c.handleTunnelChannel(newChannel)
+		ok, _, _ = c.handleTunnelChannel(newChannel)
 	}
 
-	if !ok {
-		// reject the channel
-		if err := newChannel.Reject(rejection, ""); err != nil {
-			log.Warningf("failed to reject channel: %s", err)
-		}
+	if ok {
+		return
+	}
+
+	// reject the channel, by accepting it then immediately close
+	// this is because Reject() leaks
+	channel, requests, err := newChannel.Accept()
+	if err != nil {
+		log.Warningf("failed to reject channel: %s", err)
+	}
+	go ssh.DiscardRequests(requests)
+
+	if err := channel.Close(); err != nil {
+		log.Warningf("failed to close rejected channel: %s", err)
 	}
 }
 
-func (c *Connection) handleSessionChannel(newChannel ssh.NewChannel) (bool, ssh.RejectionReason) {
+func (c *Connection) handleSessionChannel(newChannel ssh.NewChannel) (bool, ssh.RejectionReason, string) {
 	if len(newChannel.ExtraData()) > 0 {
 		// do not accept extra data in connection channel request
-		return false, ssh.Prohibited
+		return false, ssh.Prohibited, "extra data not allowed"
 	}
 
 	// accept the channel
 	channel, requests, err := newChannel.Accept()
 	if err != nil {
-		return false, ssh.ResourceShortage
+		return false, ssh.ResourceShortage, "failed to accept"
 	}
 
 	// cannot return false from this point on
@@ -370,38 +378,35 @@ func (c *Connection) handleSessionChannel(newChannel ssh.NewChannel) (bool, ssh.
 		}
 	}()
 
-	session, err := newSession(c, channel, newChannel.ChannelType(), newChannel.ExtraData())
-	if err != nil {
-		log.Errorf("failed to create accepted channel: %s", err)
-		return true, 0
-	}
+	session := newSession(c, channel, newChannel.ChannelType(), newChannel.ExtraData())
 	c.addSession(session)
 
 	// no failure
-	session.handle(requests)
+	go session.handleRequests(requests)
+	go session.handleChannel()
 
 	// do not close channel on exit
 	channel = nil
-	return true, 0
+	return true, 0, ""
 }
 
-func (c *Connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ssh.RejectionReason) {
+func (c *Connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ssh.RejectionReason, string) {
 
 	data, err := unmarshalTunnelData(newChannel.ExtraData())
 	if err != nil {
-		return false, ssh.UnknownChannelType
+		return false, ssh.UnknownChannelType, "failed to decode extra data"
 	}
 
 	// look up connection by name
 	connection, host, port := c.gateway.lookupConnectionService(data.Host, uint16(data.Port))
 	if connection == nil {
-		return false, ssh.ConnectionFailed
+		return false, ssh.ConnectionFailed, "service not found or not online"
 	}
 
 	// see if this connection is allowed
 	if !c.admin {
 		log.Warningf("no permission to port forward: user = %s", c.user)
-		return false, ssh.Prohibited
+		return false, ssh.Prohibited, "permission denied"
 	}
 
 	// found the service, attempt to open a channel
@@ -424,7 +429,7 @@ func (c *Connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ssh.R
 		},
 	})
 	if err != nil {
-		return false, ssh.ConnectionFailed
+		return false, ssh.ConnectionFailed, "failed to connect"
 	}
 	defer func() {
 		if tunnel2 != nil {
@@ -435,7 +440,7 @@ func (c *Connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ssh.R
 	// accept the channel
 	channel, requests, err := newChannel.Accept()
 	if err != nil {
-		return false, ssh.ResourceShortage
+		return false, ssh.ResourceShortage, "failed to accept"
 	}
 
 	// cannot return false from this point on
@@ -448,7 +453,7 @@ func (c *Connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ssh.R
 		}
 	}()
 
-	tunnel, err := newTunnel(c, channel, newChannel.ChannelType(), newChannel.ExtraData(), map[string]interface{}{
+	tunnel := newTunnel(c, channel, newChannel.ChannelType(), newChannel.ExtraData(), map[string]interface{}{
 		"origin": data.OriginAddress,
 		"to": map[string]interface{}{
 			"user":    connection.user,
@@ -459,19 +464,16 @@ func (c *Connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ssh.R
 			"port": data.Port,
 		},
 	})
-	if err != nil {
-		log.Errorf("failed to create accepted channel: %s", err)
-		return true, 0
-	}
 	c.addTunnel(tunnel)
 
 	// no failure
-	tunnel.handle(requests, tunnel2)
+	go tunnel.handleRequests(requests)
+	go tunnel.handleTunnel(tunnel2)
 
 	// do not close channel on exit
 	channel = nil
 	tunnel2 = nil
-	return true, 0
+	return true, 0, ""
 }
 
 // open a channel from the server to the client side
@@ -490,14 +492,11 @@ func (c *Connection) openTunnel(channelType string, extraData []byte, metadata m
 		}
 	}()
 
-	tunnel, err := newTunnel(c, channel, channelType, extraData, metadata)
-	if err != nil {
-		return nil, err
-	}
+	tunnel := newTunnel(c, channel, channelType, extraData, metadata)
 	c.addTunnel(tunnel)
 
 	// no failure
-	tunnel.handle(requests, nil)
+	go tunnel.handleRequests(requests)
 
 	// do not close channel on exit
 	channel = nil
