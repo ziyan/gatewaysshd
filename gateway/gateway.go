@@ -84,7 +84,7 @@ func NewGateway(serverVersion string, caPublicKeys, hostCertificate, hostPrivate
 					return true
 				}
 			}
-			log.Errorf("auth: unknown authority: %v", key)
+			log.Warningf("auth: unknown authority: %v", key)
 			return false
 		},
 		IsRevoked: func(cert *ssh.Certificate) bool {
@@ -122,7 +122,7 @@ func NewGateway(serverVersion string, caPublicKeys, hostCertificate, hostPrivate
 				}
 				for _, match := range matches {
 					if line == match {
-						log.Errorf("auth: certificate revoked by revocation list: %s/%d", cert.KeyId, cert.Serial)
+						log.Warningf("auth: certificate revoked by revocation list: %s/%d", cert.KeyId, cert.Serial)
 						return true
 					}
 				}
@@ -192,7 +192,7 @@ func (g *Gateway) HandleConnection(c net.Conn) {
 	defer func() {
 		if c != nil {
 			if err := c.Close(); err != nil {
-				log.Errorf("failed to close connection: %s", err)
+				log.Warningf("failed to close connection: %s", err)
 			}
 		}
 	}()
@@ -200,13 +200,13 @@ func (g *Gateway) HandleConnection(c net.Conn) {
 	usage := newUsage()
 	conn, channels, requests, err := ssh.NewServerConn(wrapConn(c, usage), g.config)
 	if err != nil {
-		log.Errorf("failed during ssh handshake: %s", err)
+		log.Warningf("failed during ssh handshake: %s", err)
 		return
 	}
 	defer func() {
 		if conn != nil {
 			if err := conn.Close(); err != nil {
-				log.Errorf("failed to close connection: %s", err)
+				log.Warningf("failed to close connection: %s", err)
 			}
 		}
 	}()

@@ -1,9 +1,8 @@
 package gateway
 
 import (
-	"bytes"
+	"compress/gzip"
 	"encoding/json"
-	"io"
 	"io/ioutil"
 	"sync"
 
@@ -50,12 +49,6 @@ func (s *Session) Close() {
 	})
 }
 
-func (s *Session) handleChannel() {
-	defer s.Close()
-
-	io.Copy(ioutil.Discard, s.channel)
-}
-
 func (s *Session) handleRequests(requests <-chan *ssh.Request) {
 	defer s.Close()
 
@@ -94,53 +87,32 @@ func (s *Session) handleRequest(request *ssh.Request) {
 	// do actual work here
 	switch request.Type {
 	case "shell":
-		defer s.Close()
-
-		var status map[string]interface{}
-		if !s.connection.admin {
-			status = s.connection.gatherStatus()
-		} else {
-			status = s.connection.gateway.gatherStatus()
-		}
-
-		encoded, err := json.MarshalIndent(status, "", "  ")
-		if err != nil {
-			log.Warningf("failed to marshal status: %s", err)
-			break
-		}
-
-		if _, err := s.channel.Write(encoded); err != nil {
-			log.Warningf("failed to send status: %s", err)
-			break
-		}
-
-		if _, err := s.channel.Write([]byte("\n")); err != nil {
-			log.Warningf("failed to send status: %s", err)
-			break
-		}
+		s.status()
 
 	case "exec":
-		defer s.Close()
-
-		// send response
-		if _, err := s.channel.Write([]byte("{}\n")); err != nil {
-			log.Warningf("failed to send status: %s", err)
-			break
-		}
-
 		r, err := unmarshalExecuteRequest(request.Payload)
 		if err != nil {
 			log.Warningf("invalid payload: %s", err)
 			break
 		}
 
-		var status json.RawMessage
-		if err := json.Unmarshal([]byte(r.Command), &status); err != nil {
-			log.Warningf("failed to unmarshal json: %s", err)
-			break
-		}
+		switch r.Command {
+		case "ping":
+			s.ping()
+		case "status":
+			s.status()
+		case "reportStatus":
+			s.reportStatus()
+		default:
+			defer s.Close()
 
-		if !bytes.Equal(status, []byte("null")) {
+			// legacy behavior, command itself is json
+			var status json.RawMessage
+			if err := json.Unmarshal([]byte(r.Command), &status); err != nil {
+				log.Warningf("failed to unmarshal json: %s", err)
+				break
+			}
+
 			s.connection.reportStatus(status)
 			s.connection.updateUser()
 		}
@@ -151,4 +123,71 @@ func (s *Session) gatherStatus() map[string]interface{} {
 	return map[string]interface{}{
 		"type": s.channelType,
 	}
+}
+
+func (s *Session) ping() {
+	defer s.Close()
+
+	if _, err := s.channel.Write([]byte("pong\n")); err != nil {
+		log.Warningf("failed to send status: %s", err)
+		return
+	}
+}
+
+func (s *Session) status() {
+	defer s.Close()
+
+	var status map[string]interface{}
+	if !s.connection.admin {
+		status = s.connection.gatherStatus()
+	} else {
+		status = s.connection.gateway.gatherStatus()
+	}
+
+	encoded, err := json.MarshalIndent(status, "", "  ")
+	if err != nil {
+		log.Warningf("failed to marshal status: %s", err)
+		return
+	}
+
+	if _, err := s.channel.Write(encoded); err != nil {
+		log.Warningf("failed to send status: %s", err)
+		return
+	}
+
+	if _, err := s.channel.Write([]byte("\n")); err != nil {
+		log.Warningf("failed to send status: %s", err)
+		return
+	}
+}
+
+func (s *Session) reportStatus() {
+	go func() {
+		defer s.Close()
+
+		reader, err := gzip.NewReader(s.channel)
+		if err != nil {
+			log.Warningf("failed to decompress: %s", err)
+			return
+		}
+		defer reader.Close()
+
+		// read all data from session
+		raw, err := ioutil.ReadAll(reader)
+		if err != nil {
+			log.Warningf("failed to read all: %s", err)
+			return
+		}
+
+		// parse it in to json
+		var status json.RawMessage
+		if err := json.Unmarshal(raw, &status); err != nil {
+			log.Warningf("failed to unmarshal json: %s", err)
+			return
+		}
+
+		// save the result
+		s.connection.reportStatus(status)
+		s.connection.updateUser()
+	}()
 }

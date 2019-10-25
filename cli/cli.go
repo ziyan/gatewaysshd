@@ -157,7 +157,7 @@ func Run(args []string) {
 		}
 		defer func() {
 			if err := listener.Close(); err != nil {
-				log.Errorf("failed to close listener: %s", err)
+				log.Warningf("failed to close listener: %s", err)
 			}
 		}()
 

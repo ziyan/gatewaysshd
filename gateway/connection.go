@@ -286,17 +286,17 @@ func (c *Connection) handleRequest(request *ssh.Request) {
 	case "tcpip-forward":
 		request, err := unmarshalForwardRequest(request.Payload)
 		if err != nil {
-			log.Errorf("failed to decode request: %s", err)
+			log.Warningf("failed to decode request: %s", err)
 			break
 		}
 
 		if request.Port == 0 {
-			log.Errorf("requested forwarding port is not allowed: %d", request.Port)
+			log.Warningf("requested forwarding port is not allowed: %d", request.Port)
 			break
 		}
 
 		if err := c.registerService(request.Host, uint16(request.Port)); err != nil {
-			log.Errorf("failed to register service in connection: %s", err)
+			log.Warningf("failed to register service in connection: %s", err)
 			break
 		}
 
@@ -305,12 +305,12 @@ func (c *Connection) handleRequest(request *ssh.Request) {
 	case "cancel-tcpip-forward":
 		request, err := unmarshalForwardRequest(request.Payload)
 		if err != nil {
-			log.Errorf("failed to decode request: %s", err)
+			log.Warningf("failed to decode request: %s", err)
 			break
 		}
 
 		if err := c.deregisterService(request.Host, uint16(request.Port)); err != nil {
-			log.Errorf("failed to register service in connection: %s", err)
+			log.Warningf("failed to register service in connection: %s", err)
 			break
 		}
 
@@ -383,7 +383,6 @@ func (c *Connection) handleSessionChannel(newChannel ssh.NewChannel) (bool, ssh.
 
 	// no failure
 	go session.handleRequests(requests)
-	go session.handleChannel()
 
 	// do not close channel on exit
 	channel = nil
@@ -514,6 +513,6 @@ func (c *Connection) updateUser() {
 		Status:   c.status,
 		Used:     c.usage.used.Unix(),
 	}); err != nil {
-		log.Errorf("failed to save connection in database: %s", err)
+		log.Errorf("failed to save user in database: %s", err)
 	}
 }
