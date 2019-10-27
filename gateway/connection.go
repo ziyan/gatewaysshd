@@ -329,30 +329,33 @@ func (c *Connection) handleChannel(newChannel ssh.NewChannel) {
 	log.Debugf("new channel: type = %s, data = %v", newChannel.ChannelType(), newChannel.ExtraData())
 
 	ok := false
-	// rejection := ssh.UnknownChannelType
-	// message := "unknown channel type"
+	rejection := ssh.UnknownChannelType
+	message := "unknown channel type"
 
 	switch newChannel.ChannelType() {
 	case "session":
-		ok, _, _ = c.handleSessionChannel(newChannel)
+		ok, rejection, message = c.handleSessionChannel(newChannel)
 	case "direct-tcpip":
-		ok, _, _ = c.handleTunnelChannel(newChannel)
+		ok, rejection, message = c.handleTunnelChannel(newChannel)
 	}
 
 	if ok {
 		return
 	}
+	log.Debugf("channel rejected due to %d: %s", rejection, message)
 
 	// reject the channel, by accepting it then immediately close
 	// this is because Reject() leaks
 	channel, requests, err := newChannel.Accept()
 	if err != nil {
 		log.Warningf("failed to reject channel: %s", err)
+		return
 	}
 	go ssh.DiscardRequests(requests)
 
 	if err := channel.Close(); err != nil {
 		log.Warningf("failed to close rejected channel: %s", err)
+		return
 	}
 }
 
@@ -365,7 +368,8 @@ func (c *Connection) handleSessionChannel(newChannel ssh.NewChannel) (bool, ssh.
 	// accept the channel
 	channel, requests, err := newChannel.Accept()
 	if err != nil {
-		return false, ssh.ResourceShortage, "failed to accept"
+		log.Warningf("failed to accept channel: %s", err)
+		return true, 0, ""
 	}
 
 	// cannot return false from this point on
@@ -439,7 +443,8 @@ func (c *Connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ssh.R
 	// accept the channel
 	channel, requests, err := newChannel.Accept()
 	if err != nil {
-		return false, ssh.ResourceShortage, "failed to accept"
+		log.Warningf("failed to accept channel: %s", err)
+		return true, 0, ""
 	}
 
 	// cannot return false from this point on
