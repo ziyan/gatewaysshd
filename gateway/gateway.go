@@ -340,7 +340,6 @@ func (g *Gateway) ListUsers() (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	for _, model := range models {
 		if _, ok := users[model.ID]; !ok {
 			users[model.ID] = map[string]interface{}{
@@ -350,6 +349,7 @@ func (g *Gateway) ListUsers() (interface{}, error) {
 				"used":     model.Used,
 			}
 		}
+		users[model.ID]["database"] = true
 	}
 
 	// make it into a list
@@ -404,18 +404,22 @@ func (g *Gateway) GetUser(id string) (interface{}, error) {
 		return nil, nil
 	}
 
-	if len(connections) == 0 {
-		user["address"] = model.Address
-		user["location"] = model.Location
-		user["used"] = model.Used
-	}
-
-	if model != nil && model.Status != nil {
-		if _, ok := user["status"]; !ok {
-			user["status"] = model.Status
+	if model != nil {
+		if len(connections) == 0 {
+			user["address"] = model.Address
+			user["location"] = model.Location
+			user["used"] = model.Used
+		}
+		user["database"] = true
+		if model.Status != nil {
+			if _, ok := user["status"]; !ok {
+				user["status"] = model.Status
+			}
 		}
 	}
 
 	user["connections"] = connections
-	return user, nil
+	return map[string]interface{}{
+		"user": user,
+	}, nil
 }
