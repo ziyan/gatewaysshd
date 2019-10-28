@@ -126,3 +126,20 @@ func (d *Database) listUsers() ([]*userModel, error) {
 	}
 	return results, nil
 }
+
+func (d *Database) getUser(id string) (*userModel, error) {
+	var result *userModel
+	if err := d.db.View(func(tx *bolt.Tx) error {
+		var model *userModel
+		if raw := tx.Bucket(bucketUsers).Get([]byte(id)); raw != nil {
+			if err := json.Unmarshal(raw, &model); err != nil {
+				return err
+			}
+		}
+		result = model
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return result, nil
+}

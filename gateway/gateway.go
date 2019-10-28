@@ -313,27 +313,109 @@ func (g *Gateway) gatherStatus() map[string]interface{} {
 	}
 }
 
-func (g *Gateway) ListConnections() (interface{}, error) {
-	return g.gatherStatus(), nil
-}
-
 func (g *Gateway) ListUsers() (interface{}, error) {
+	users := make(map[string]map[string]interface{})
+	connectionsCount := make(map[string]int)
+
+	// first collect users from live connections
+	func() {
+		g.lock.Lock()
+		defer g.lock.Unlock()
+
+		for _, connection := range g.connectionsList {
+			if _, ok := users[connection.user]; !ok {
+				users[connection.user] = map[string]interface{}{
+					"id":       connection.user,
+					"address":  connection.remoteAddr.String(),
+					"location": connection.location,
+					"used":     connection.usage.used.Unix(),
+				}
+			}
+			connectionsCount[connection.user]++
+		}
+	}()
+
+	// then collect more users from database
 	models, err := g.database.listUsers()
 	if err != nil {
 		return nil, err
 	}
 
-	users := make([]interface{}, 0, len(models))
 	for _, model := range models {
-		users = append(users, map[string]interface{}{
-			"id":       model.ID,
-			"address":  model.Address,
-			"location": model.Location,
-			"status":   model.Status,
-			"used":     model.Used,
-		})
+		if _, ok := users[model.ID]; !ok {
+			users[model.ID] = map[string]interface{}{
+				"id":       model.ID,
+				"address":  model.Address,
+				"location": model.Location,
+				"used":     model.Used,
+			}
+		}
+	}
+
+	// make it into a list
+	usersList := make([]interface{}, 0, len(users))
+	for id, user := range users {
+		user["connections_count"] = connectionsCount[id]
+		usersList = append(usersList, user)
 	}
 	return map[string]interface{}{
-		"users": users,
+		"users": usersList,
+		"meta": map[string]interface{}{
+			"total_count": len(usersList),
+		},
 	}, nil
+}
+
+func (g *Gateway) GetUser(id string) (interface{}, error) {
+	connections := make([]interface{}, 0)
+	user := map[string]interface{}{
+		"id": id,
+	}
+
+	func() {
+		g.lock.Lock()
+		defer g.lock.Unlock()
+
+		for _, connection := range g.connectionsList {
+			if connection.user != id {
+				continue
+			}
+			if len(connections) == 0 {
+				user["address"] = connection.remoteAddr.String()
+				user["location"] = connection.location
+				user["used"] = connection.usage.used.Unix()
+			}
+			connectionStatus := connection.gatherStatus()
+			if connectionStatus["status"] != nil {
+				if _, ok := user["status"]; !ok {
+					user["status"] = connectionStatus["status"]
+				}
+			}
+			delete(connectionStatus, "status")
+			connections = append(connections, connectionStatus)
+		}
+	}()
+
+	model, err := g.database.getUser(id)
+	if err != nil {
+		return nil, err
+	}
+	if model == nil && len(connections) == 0 {
+		return nil, nil
+	}
+
+	if len(connections) == 0 {
+		user["address"] = model.Address
+		user["location"] = model.Location
+		user["used"] = model.Used
+	}
+
+	if model != nil && model.Status != nil {
+		if _, ok := user["status"]; !ok {
+			user["status"] = model.Status
+		}
+	}
+
+	user["connections"] = connections
+	return user, nil
 }

@@ -2,12 +2,14 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/pprof"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"github.com/op/go-logging"
@@ -187,10 +189,16 @@ func Run(args []string) {
 			go func() {
 				defer close(httping)
 
+				ErrNotFound := errors.New("404: not found")
+
 				wrapHandler := func(handler func(*http.Request) (interface{}, error)) func(http.ResponseWriter, *http.Request) {
 					return func(response http.ResponseWriter, request *http.Request) {
 						result, err := handler(request)
 						if err != nil {
+							if err == ErrNotFound {
+								http.NotFound(response, request)
+								return
+							}
 							log.Errorf("failed to handle request: %s", err)
 							http.Error(response, "500 internal server error", http.StatusInternalServerError)
 							return
@@ -209,11 +217,22 @@ func Run(args []string) {
 				}
 
 				mux := http.NewServeMux()
-				mux.HandleFunc("/api/users", wrapHandler(func(request *http.Request) (interface{}, error) {
+				mux.HandleFunc("/api/user", wrapHandler(func(request *http.Request) (interface{}, error) {
 					return gateway.ListUsers()
 				}))
-				mux.HandleFunc("/api/connections", wrapHandler(func(request *http.Request) (interface{}, error) {
-					return gateway.ListConnections()
+				mux.HandleFunc("/api/user/", wrapHandler(func(request *http.Request) (interface{}, error) {
+					parts := strings.Split(request.URL.Path, "/")
+					if len(parts) != 4 {
+						return nil, ErrNotFound
+					}
+					user, err := gateway.GetUser(parts[3])
+					if err != nil {
+						return nil, err
+					}
+					if user == nil {
+						return nil, ErrNotFound
+					}
+					return user, nil
 				}))
 
 				if c.Bool("debug-pprof") {
