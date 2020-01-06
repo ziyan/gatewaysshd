@@ -40,67 +40,67 @@ func Run(args []string) {
 	app.Usage = "A daemon that provides a meeting place for all your SSH tunnels."
 
 	app.Flags = []cli.Flag{
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "log-level",
 			Value: "INFO",
 			Usage: "log level",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "log-format",
 			Value: "%{color}%{time:2006-01-02T15:04:05.000Z07:00} [%{level:.4s}] [%{shortfile} %{shortfunc}] %{message}%{color:reset}",
 			Usage: "log format",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "listen-ssh",
 			Value: ":2020",
 			Usage: "ssh listen endpoint",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "listen-http",
 			Value: "",
 			Usage: "http listen endpoint",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "ca-public-key",
 			Value: "id_rsa.ca.pub",
 			Usage: "path to certificate authority public key",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "host-certificate",
 			Value: "id_rsa.host-cert.pub",
 			Usage: "path to host certificate",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "host-private-key",
 			Value: "id_rsa.host",
 			Usage: "path to host private key",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "server-version",
 			Value: "SSH-2.0-gatewaysshd",
 			Usage: "server version string",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "revocation-list",
 			Value: "crl.txt",
 			Usage: "a file containing one certificate key id per line for revoked certificates",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "idle-timeout",
 			Value: "600s",
 			Usage: "idle timeout",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "geoip-database",
 			Value: "geoip.mmdb",
 			Usage: "path to the geoip database file",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "database",
 			Value: "database.db",
 			Usage: "path to database file",
 		},
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "debug-pprof",
 			Usage: "enable pprof debugging",
 		},
