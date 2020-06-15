@@ -145,7 +145,7 @@ func NewGateway(serverVersion string, caPublicKeys, hostCertificate, hostPrivate
 			if err != nil {
 				return nil, err
 			}
-            return permissions, nil
+			return permissions, nil
 		},
 		AuthLogCallback: func(meta ssh.ConnMetadata, method string, err error) {
 			log.Debugf("auth: remote = %s, local = %s, method = %s, error = %v", meta.RemoteAddr(), meta.LocalAddr(), method, err)
