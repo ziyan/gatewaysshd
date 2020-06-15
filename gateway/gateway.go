@@ -145,20 +145,7 @@ func NewGateway(serverVersion string, caPublicKeys, hostCertificate, hostPrivate
 			if err != nil {
 				return nil, err
 			}
-
-			// only the first ca is allowed to pass down permissions
-			cert, ok := key.(*ssh.Certificate)
-			if ok {
-				for _, ca := range cas {
-					if bytes.Compare(ca.Marshal(), cert.SignatureKey.Marshal()) == 0 {
-						return permissions, nil
-					}
-					break
-				}
-			}
-
-			// return empty permission
-			return &ssh.Permissions{}, nil
+            return permissions, nil
 		},
 		AuthLogCallback: func(meta ssh.ConnMetadata, method string, err error) {
 			log.Debugf("auth: remote = %s, local = %s, method = %s, error = %v", meta.RemoteAddr(), meta.LocalAddr(), method, err)

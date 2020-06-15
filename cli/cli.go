@@ -36,7 +36,7 @@ func Run(args []string) {
 	app := cli.NewApp()
 	app.EnableBashCompletion = true
 	app.Name = "gatewaysshd"
-	app.Version = "0.1.0"
+	app.Version = "0.1.1"
 	app.Usage = "A daemon that provides a meeting place for all your SSH tunnels."
 
 	app.Flags = []cli.Flag{
