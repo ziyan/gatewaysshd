@@ -65,7 +65,7 @@ Build
 gofmt -l -w gateway cli
 
 # build and strip executable
-CGO_ENABLED=0 go build github.com/ziyan/gatewaysshd
+CGO_ENABLED=0 go build -mod=vendor github.com/ziyan/gatewaysshd
 objcopy --strip-all gatewaysshd
 
 # build docker image
