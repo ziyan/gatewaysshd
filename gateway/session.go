@@ -29,35 +29,35 @@ func newSession(connection *Connection, channel ssh.Channel, channelType string,
 }
 
 // close the session
-func (s *Session) Close() {
-	s.closeOnce.Do(func() {
-		if err := s.channel.CloseWrite(); err != nil {
+func (self *Session) Close() {
+	self.closeOnce.Do(func() {
+		if err := self.channel.CloseWrite(); err != nil {
 			log.Warningf("failed to close session: %s", err)
 		}
 
-		if _, err := s.channel.SendRequest("exit-status", false, []byte{0, 0, 0, 0}); err != nil {
+		if _, err := self.channel.SendRequest("exit-status", false, []byte{0, 0, 0, 0}); err != nil {
 			log.Warningf("failed to send exit-status for session: %s", err)
 		}
 
-		if err := s.channel.Close(); err != nil {
+		if err := self.channel.Close(); err != nil {
 			log.Warningf("failed to close session: %s", err)
 		}
 
-		log.Debugf("session closed: user = %s, remote = %v, type = %s", s.connection.user, s.connection.remoteAddr, s.channelType)
+		log.Debugf("session closed: user = %s, remote = %v, type = %s", self.connection.user, self.connection.remoteAddr, self.channelType)
 
-		s.connection.deleteSession(s)
+		self.connection.deleteSession(self)
 	})
 }
 
-func (s *Session) handleRequests(requests <-chan *ssh.Request) {
-	defer s.Close()
+func (self *Session) handleRequests(requests <-chan *ssh.Request) {
+	defer self.Close()
 
 	for request := range requests {
-		go s.handleRequest(request)
+		go self.handleRequest(request)
 	}
 }
 
-func (s *Session) handleRequest(request *ssh.Request) {
+func (self *Session) handleRequest(request *ssh.Request) {
 	log.Debugf("request received: type = %s, want_reply = %v, payload = %v", request.Type, request.WantReply, request.Payload)
 
 	// check parameters
@@ -87,7 +87,7 @@ func (s *Session) handleRequest(request *ssh.Request) {
 	// do actual work here
 	switch request.Type {
 	case "shell":
-		s.status()
+		self.status()
 
 	case "exec":
 		r, err := unmarshalExecuteRequest(request.Payload)
@@ -98,13 +98,13 @@ func (s *Session) handleRequest(request *ssh.Request) {
 
 		switch r.Command {
 		case "ping":
-			s.ping()
+			self.ping()
 		case "status":
-			s.status()
+			self.status()
 		case "reportStatus":
-			s.reportStatus()
+			self.reportStatus()
 		default:
-			defer s.Close()
+			defer self.Close()
 
 			// legacy behavior, command itself is json
 			var status json.RawMessage
@@ -113,35 +113,39 @@ func (s *Session) handleRequest(request *ssh.Request) {
 				break
 			}
 
-			s.connection.reportStatus(status)
-			s.connection.updateUser()
+			self.connection.reportStatus(status)
+			self.connection.updateUser()
 		}
 	}
 }
 
-func (s *Session) gatherStatus() map[string]interface{} {
-	return map[string]interface{}{
-		"type": s.channelType,
+type sessionStatus struct {
+	Type string `json:"type,omitempty"`
+}
+
+func (self *Session) gatherStatus() *sessionStatus {
+	return &sessionStatus{
+		Type: self.channelType,
 	}
 }
 
-func (s *Session) ping() {
-	defer s.Close()
+func (self *Session) ping() {
+	defer self.Close()
 
-	if _, err := s.channel.Write([]byte("pong\n")); err != nil {
+	if _, err := self.channel.Write([]byte("pong\n")); err != nil {
 		log.Warningf("failed to send status: %s", err)
 		return
 	}
 }
 
-func (s *Session) status() {
-	defer s.Close()
+func (self *Session) status() {
+	defer self.Close()
 
-	var status map[string]interface{}
-	if !s.connection.admin {
-		status = s.connection.gatherStatus()
+	var status interface{}
+	if !self.connection.admin {
+		status = self.connection.gatherStatus()
 	} else {
-		status = s.connection.gateway.gatherStatus()
+		status = self.connection.gateway.gatherStatus()
 	}
 
 	encoded, err := json.MarshalIndent(status, "", "  ")
@@ -150,22 +154,22 @@ func (s *Session) status() {
 		return
 	}
 
-	if _, err := s.channel.Write(encoded); err != nil {
+	if _, err := self.channel.Write(encoded); err != nil {
 		log.Warningf("failed to send status: %s", err)
 		return
 	}
 
-	if _, err := s.channel.Write([]byte("\n")); err != nil {
+	if _, err := self.channel.Write([]byte("\n")); err != nil {
 		log.Warningf("failed to send status: %s", err)
 		return
 	}
 }
 
-func (s *Session) reportStatus() {
+func (self *Session) reportStatus() {
 	go func() {
-		defer s.Close()
+		defer self.Close()
 
-		reader, err := gzip.NewReader(s.channel)
+		reader, err := gzip.NewReader(self.channel)
 		if err != nil {
 			log.Warningf("failed to decompress: %s", err)
 			return
@@ -187,7 +191,7 @@ func (s *Session) reportStatus() {
 		}
 
 		// save the result
-		s.connection.reportStatus(status)
-		s.connection.updateUser()
+		self.connection.reportStatus(status)
+		self.connection.updateUser()
 	}()
 }

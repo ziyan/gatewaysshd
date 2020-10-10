@@ -30,27 +30,27 @@ func newTunnel(connection *Connection, channel ssh.Channel, channelType string, 
 }
 
 // close the tunnel
-func (t *Tunnel) Close() {
-	t.closeOnce.Do(func() {
-		if err := t.channel.Close(); err != nil {
+func (self *Tunnel) Close() {
+	self.closeOnce.Do(func() {
+		if err := self.channel.Close(); err != nil {
 			log.Warningf("failed to close tunnel: %s", err)
 		}
 
-		log.Infof("tunnel closed: user = %s, remote = %v, type = %s, metadata = %v", t.connection.user, t.connection.remoteAddr, t.channelType, t.metadata)
+		log.Infof("tunnel closed: user = %s, remote = %v, type = %s, metadata = %v", self.connection.user, self.connection.remoteAddr, self.channelType, self.metadata)
 
-		t.connection.deleteTunnel(t)
+		self.connection.deleteTunnel(self)
 	})
 }
 
-func (t *Tunnel) handleRequests(requests <-chan *ssh.Request) {
-	defer t.Close()
+func (self *Tunnel) handleRequests(requests <-chan *ssh.Request) {
+	defer self.Close()
 
 	for request := range requests {
-		go t.handleRequest(request)
+		go self.handleRequest(request)
 	}
 }
 
-func (t *Tunnel) handleRequest(request *ssh.Request) {
+func (self *Tunnel) handleRequest(request *ssh.Request) {
 	log.Debugf("request received: type = %s, want_reply = %v, payload = %v", request.Type, request.WantReply, request.Payload)
 
 	// reply to client
@@ -62,20 +62,20 @@ func (t *Tunnel) handleRequest(request *ssh.Request) {
 	}
 }
 
-func (t *Tunnel) handleTunnel(t2 *Tunnel) {
+func (self *Tunnel) handleTunnel(t2 *Tunnel) {
 	defer t2.Close()
-	defer t.Close()
+	defer self.Close()
 
 	done1 := make(chan struct{})
 	go func() {
 		defer close(done1)
-		io.Copy(t.channel, t2.channel)
+		io.Copy(self.channel, t2.channel)
 	}()
 
 	done2 := make(chan struct{})
 	go func() {
 		defer close(done2)
-		io.Copy(t2.channel, t.channel)
+		io.Copy(t2.channel, self.channel)
 	}()
 
 	select {
@@ -84,12 +84,14 @@ func (t *Tunnel) handleTunnel(t2 *Tunnel) {
 	}
 }
 
-func (t *Tunnel) gatherStatus() map[string]interface{} {
-	status := map[string]interface{}{
-		"type": t.channelType,
+type tunnelStatus struct {
+	Type     string                 `json:"type,omitempty"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+}
+
+func (self *Tunnel) gatherStatus() *tunnelStatus {
+	return &tunnelStatus{
+		Type:     self.channelType,
+		Metadata: self.metadata,
 	}
-	for k, v := range t.metadata {
-		status[k] = v
-	}
-	return status
 }

@@ -6,7 +6,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/oschwald/geoip2-golang"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -87,44 +86,6 @@ func unmarshalExecuteRequest(payload []byte) (*executeRequest, error) {
 	return request, nil
 }
 
-func lookupLocation(db string, ip net.IP) map[string]interface{} {
-	d, err := geoip2.Open(db)
-	if err != nil {
-		log.Warningf("failed to open geoip database file %s: %s", db, err)
-		return nil
-	}
-	defer d.Close()
-
-	r, err := d.City(ip)
-	if err != nil {
-		return nil
-	}
-
-	if r.Country.IsoCode == "" {
-		return nil
-	}
-
-	if r.Location.Latitude == 0 && r.Location.Longitude == 0 {
-		return nil
-	}
-
-	location := map[string]interface{}{
-		"country":   r.Country.IsoCode,
-		"latitude":  r.Location.Latitude,
-		"longitude": r.Location.Longitude,
-	}
-	if r.City.Names["en"] != "" {
-		location["city"] = r.City.Names["en"]
-	}
-	if r.Location.TimeZone != "" {
-		location["timezone"] = r.Location.TimeZone
-	}
-	if len(r.Subdivisions) > 0 && r.Subdivisions[0].Names["en"] != "" {
-		location["subdivision"] = r.Subdivisions[0].Names["en"]
-	}
-	return location
-}
-
 type usageStats struct {
 	bytesRead    uint64
 	bytesWritten uint64
@@ -174,43 +135,43 @@ func wrapConn(conn net.Conn, usage *usageStats) *wrappedConn {
 }
 
 // override read to keep track of data usage
-func (c *wrappedConn) Read(data []byte) (int, error) {
-	size, err := c.conn.Read(data)
+func (self *wrappedConn) Read(data []byte) (int, error) {
+	size, err := self.conn.Read(data)
 	if err == nil {
-		c.usage.read(uint64(size))
+		self.usage.read(uint64(size))
 	}
 	return size, err
 }
 
 // override write to keep track of data usage
-func (c *wrappedConn) Write(data []byte) (int, error) {
-	size, err := c.conn.Write(data)
+func (self *wrappedConn) Write(data []byte) (int, error) {
+	size, err := self.conn.Write(data)
 	if err == nil {
-		c.usage.write(uint64(size))
+		self.usage.write(uint64(size))
 	}
 	return size, err
 }
 
-func (c *wrappedConn) Close() error {
-	return c.conn.Close()
+func (self *wrappedConn) Close() error {
+	return self.conn.Close()
 }
 
-func (c *wrappedConn) LocalAddr() net.Addr {
-	return c.conn.LocalAddr()
+func (self *wrappedConn) LocalAddr() net.Addr {
+	return self.conn.LocalAddr()
 }
 
-func (c *wrappedConn) RemoteAddr() net.Addr {
-	return c.conn.RemoteAddr()
+func (self *wrappedConn) RemoteAddr() net.Addr {
+	return self.conn.RemoteAddr()
 }
 
-func (c *wrappedConn) SetDeadline(t time.Time) error {
-	return c.conn.SetDeadline(t)
+func (self *wrappedConn) SetDeadline(t time.Time) error {
+	return self.conn.SetDeadline(t)
 }
 
-func (c *wrappedConn) SetReadDeadline(t time.Time) error {
-	return c.conn.SetReadDeadline(t)
+func (self *wrappedConn) SetReadDeadline(t time.Time) error {
+	return self.conn.SetReadDeadline(t)
 }
 
-func (c *wrappedConn) SetWriteDeadline(t time.Time) error {
-	return c.conn.SetWriteDeadline(t)
+func (self *wrappedConn) SetWriteDeadline(t time.Time) error {
+	return self.conn.SetWriteDeadline(t)
 }

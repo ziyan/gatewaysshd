@@ -27,3 +27,4 @@ _testmain.go
 /gatewaysshd
 /tmp
 /data
+/coverage.*
