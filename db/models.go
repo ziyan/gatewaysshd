@@ -33,18 +33,28 @@ func (self Location) Value() (driver.Value, error) {
 type Status json.RawMessage
 
 func (self *Status) Scan(value interface{}) error {
-	var status Status
+	var message json.RawMessage
 	if raw, ok := value.([]byte); ok {
-		if err := json.Unmarshal(raw, &status); err != nil {
+		if err := json.Unmarshal(raw, &message); err != nil {
 			return err
 		}
 	}
-	*self = status
+	*self = Status(message)
 	return nil
 }
 
 func (self Status) Value() (driver.Value, error) {
-	return json.Marshal(self)
+	if len(self) == 0 {
+		return nil, nil
+	}
+	return json.RawMessage(self).MarshalJSON()
+}
+
+func (self Status) MarshalJSON() ([]byte, error) {
+	if len(self) == 0 {
+		return nil, nil
+	}
+	return json.RawMessage(self).MarshalJSON()
 }
 
 // represents a user connected to gateway

@@ -67,17 +67,17 @@ var flags = []cli.Flag{
 	},
 	cli.StringFlag{
 		Name:  "postgres-user",
-		Value: "musshd",
+		Value: "gatewaysshd",
 		Usage: "user to authenticate with postgres database",
 	},
 	cli.StringFlag{
 		Name:  "postgres-password",
-		Value: "musshd",
+		Value: "gatewaysshd",
 		Usage: "password to authenticate with postgres database",
 	},
 	cli.StringFlag{
 		Name:  "postgres-dbname",
-		Value: "musshd",
+		Value: "gatewaysshd",
 		Usage: "postgres database name",
 	},
 	cli.BoolFlag{
