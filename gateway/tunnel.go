@@ -61,20 +61,22 @@ func (self *tunnel) handleTunnel(otherTunnel *tunnel) {
 	defer otherTunnel.close()
 	defer self.close()
 
-	var waitGroup sync.WaitGroup
-	defer waitGroup.Wait()
-
-	waitGroup.Add(1)
+	done1 := make(chan struct{})
 	go func() {
-		defer waitGroup.Done()
+		defer close(done1)
 		io.Copy(self.channel, otherTunnel.channel)
 	}()
 
-	waitGroup.Add(1)
+	done2 := make(chan struct{})
 	go func() {
-		defer waitGroup.Done()
+		defer close(done2)
 		io.Copy(otherTunnel.channel, self.channel)
 	}()
+
+	select {
+	case <-done1:
+	case <-done2:
+	}
 }
 
 type tunnelStatus struct {
