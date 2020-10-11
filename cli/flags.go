@@ -1,7 +1,11 @@
 package cli
 
 import (
+	"io/ioutil"
+	"time"
+
 	"github.com/urfave/cli"
+	"golang.org/x/crypto/ssh"
 )
 
 var flags = []cli.Flag{
@@ -31,13 +35,13 @@ var flags = []cli.Flag{
 		Usage: "path to certificate authority public key",
 	},
 	cli.StringFlag{
-		Name:  "host-certificate",
-		Value: "id_rsa.host-cert.pub",
-		Usage: "path to host certificate",
+		Name:  "host-public-key",
+		Value: "id_rsa.pub",
+		Usage: "path to host public key or certificate",
 	},
 	cli.StringFlag{
 		Name:  "host-private-key",
-		Value: "id_rsa.host",
+		Value: "id_rsa",
 		Usage: "path to host private key",
 	},
 	cli.StringFlag{
@@ -84,4 +88,57 @@ var flags = []cli.Flag{
 		Name:  "debug-pprof",
 		Usage: "enable pprof debugging",
 	},
+}
+
+func parseCaPublicKeys(c *cli.Context) ([]ssh.PublicKey, error) {
+	// get the keys
+	caPublicKeyRaw, err := ioutil.ReadFile(c.String("ca-public-key"))
+	if err != nil {
+		return nil, err
+	}
+	var caPublicKeys []ssh.PublicKey
+	for len(caPublicKeyRaw) > 0 {
+		caPublicKey, _, _, rest, err := ssh.ParseAuthorizedKey(caPublicKeyRaw)
+		if err != nil {
+			return nil, err
+		}
+		caPublicKeys = append(caPublicKeys, caPublicKey)
+		caPublicKeyRaw = rest
+	}
+	return caPublicKeys, nil
+}
+
+func parseHostSigner(c *cli.Context) (ssh.Signer, error) {
+	// parse host private key
+	hostPrivateKeyRaw, err := ioutil.ReadFile(c.String("host-private-key"))
+	if err != nil {
+		return nil, err
+	}
+	hostPrivateKey, err := ssh.ParsePrivateKey(hostPrivateKeyRaw)
+	if err != nil {
+		return nil, err
+	}
+
+	// parse host certificate
+	hostPublicKeyRaw, err := ioutil.ReadFile(c.String("host-public-key"))
+	if err != nil {
+		return nil, err
+	}
+	hostPublicKey, _, _, _, err := ssh.ParseAuthorizedKey(hostPublicKeyRaw)
+	if err != nil {
+		return nil, err
+	}
+
+	if hostCertificate, ok := hostPublicKey.(*ssh.Certificate); ok {
+		hostSigner, err := ssh.NewCertSigner(hostCertificate, hostPrivateKey)
+		if err != nil {
+			return nil, err
+		}
+		return hostSigner, nil
+	}
+	return hostPrivateKey, nil
+}
+
+func parseIdleTimeout(c *cli.Context) (time.Duration, error) {
+	return time.ParseDuration(c.String("idle-timeout"))
 }

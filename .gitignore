@@ -28,3 +28,4 @@ _testmain.go
 /tmp
 /data
 /coverage.*
+/id_rsa*

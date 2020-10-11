@@ -2,15 +2,10 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"io/ioutil"
 	"net"
 	"net/http"
-	"net/http/pprof"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -24,26 +19,19 @@ import (
 )
 
 func run(c *cli.Context) error {
-	// get the keys
-	caPublicKey, err := ioutil.ReadFile(c.String("ca-public-key"))
+	caPublicKeys, err := parseCaPublicKeys(c)
 	if err != nil {
-		log.Errorf("failed to load certificate authority public key from file \"%s\": %s", c.String("ca-public-key"), err)
+		log.Errorf("failed to parse certificate authority public key from file \"%s\": %s", c.String("ca-public-key"), err)
 		return err
 	}
 
-	hostCertificate, err := ioutil.ReadFile(c.String("host-certificate"))
+	hostSigner, err := parseHostSigner(c)
 	if err != nil {
-		log.Errorf("failed to load host certificate from file \"%s\": %s", c.String("certificate"), err)
+		log.Errorf("failed to host key from file \"%s\" and \"%s\": %s", c.String("host-private-key"), c.String("host-public-key"), err)
 		return err
 	}
 
-	hostPrivateKey, err := ioutil.ReadFile(c.String("host-private-key"))
-	if err != nil {
-		log.Errorf("failed to load host private key from file \"%s\": %s", c.String("host-private-key"), err)
-		return err
-	}
-
-	idleTimeout, err := time.ParseDuration(c.String("idle-timeout"))
+	idleTimeout, err := parseIdleTimeout(c)
 	if err != nil {
 		log.Errorf("failed to parse idle timeout \"%s\": %s", c.String("idle-timeout"), err)
 		return err
@@ -95,12 +83,13 @@ func run(c *cli.Context) error {
 	}
 
 	// create ssh auth config
-	sshConfig, err := auth.NewConfig(database, caPublicKey, hostCertificate, hostPrivateKey, c.String("geoip-database"))
+	sshConfig, err := auth.NewConfig(database, caPublicKeys, c.String("geoip-database"))
 	if err != nil {
 		log.Errorf("failed to create ssh config: %s", err)
 		return err
 	}
 	sshConfig.ServerVersion = c.String("server-version")
+	sshConfig.AddHostKey(hostSigner)
 
 	// create gateway
 	gateway, err := gateway.Open(database, sshConfig)
@@ -157,62 +146,9 @@ func run(c *cli.Context) error {
 	var httpServer *http.Server
 	httpRunning := make(chan struct{})
 	if c.String("listen-http") != "" {
-		ErrNotFound := errors.New("404: not found")
-
-		wrapHandler := func(handler func(*http.Request) (interface{}, error)) func(http.ResponseWriter, *http.Request) {
-			return func(response http.ResponseWriter, request *http.Request) {
-				result, err := handler(request)
-				if err != nil {
-					if err == ErrNotFound {
-						http.NotFound(response, request)
-						return
-					}
-					log.Errorf("failed to handle request: %s", err)
-					http.Error(response, "500 internal server error", http.StatusInternalServerError)
-					return
-				}
-
-				raw, err := json.Marshal(result)
-				if err != nil {
-					log.Errorf("failed to encode json: %s", err)
-					http.Error(response, "500 internal server error", http.StatusInternalServerError)
-					return
-				}
-
-				response.Header().Set("Content-Type", "application/json; charset=utf-8")
-				response.Write(raw)
-			}
-		}
-
-		mux := http.NewServeMux()
-		mux.HandleFunc("/api/user", wrapHandler(func(request *http.Request) (interface{}, error) {
-			return gateway.ListUsers()
-		}))
-		mux.HandleFunc("/api/user/", wrapHandler(func(request *http.Request) (interface{}, error) {
-			parts := strings.Split(request.URL.Path, "/")
-			if len(parts) != 4 {
-				return nil, ErrNotFound
-			}
-			user, err := gateway.GetUser(parts[3])
-			if err != nil {
-				return nil, err
-			}
-			if user == nil {
-				return nil, ErrNotFound
-			}
-			return user, nil
-		}))
-
-		if c.Bool("debug-pprof") {
-			mux.HandleFunc("/debug/pprof/", pprof.Index)
-			mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-			mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-			mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-			mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-		}
 		httpServer = &http.Server{
 			Addr:    c.String("listen-http"),
-			Handler: mux,
+			Handler: newHttpHandler(gateway, c.Bool("debug-pprof")),
 		}
 		waitGroup.Add(1)
 		go func() {
@@ -280,6 +216,5 @@ func run(c *cli.Context) error {
 			}
 		}()
 	}
-
 	return nil
 }
