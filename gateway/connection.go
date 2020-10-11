@@ -153,7 +153,8 @@ type connectionStatus struct {
 	Used    time.Time `json:"used,omitempty"`
 
 	User                 string `json:"user,omitempty"`
-	PermitPortForwarding bool   `json:"permitPortForwarding,omitempty"`
+	Administrator        bool   `json:"administrator,omitempty"`
+	PermitPortForwarding bool   `json:"permit_port_forwarding,omitempty"`
 	Address              string `json:"address,omitempty"`
 
 	Tunnels       []*tunnelStatus `json:"tunnels,omitempty"`
@@ -190,6 +191,7 @@ func (self *connection) gatherStatus() *connectionStatus {
 	return &connectionStatus{
 		ID:                   self.id,
 		User:                 self.user,
+		Administrator:        self.administrator,
 		PermitPortForwarding: self.permitPortForwarding,
 		Address:              self.remoteAddr.String(),
 		Tunnels:              tunnels,
