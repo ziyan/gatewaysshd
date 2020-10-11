@@ -432,7 +432,7 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 		}
 	}()
 
-	tunnel := newTunnel(self, channel, newChannel.ChannelType(), newChannel.ExtraData(), map[string]interface{}{
+	thisTunnel := newTunnel(self, channel, newChannel.ChannelType(), newChannel.ExtraData(), map[string]interface{}{
 		"origin": data.OriginAddress,
 		"to": map[string]interface{}{
 			"user":    otherConnection.user,
@@ -443,18 +443,18 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 			"port": data.Port,
 		},
 	})
-	self.addTunnel(tunnel)
+	self.addTunnel(thisTunnel)
 
 	// no failure
 	self.waitGroup.Add(2)
 	go func() {
 		defer self.waitGroup.Done()
-		tunnel.handleRequests(requests)
+		thisTunnel.handleRequests(requests)
 	}()
-	go func() {
+	go func(otherTunnel *tunnel) {
 		defer self.waitGroup.Done()
-		tunnel.handleTunnel(otherTunnel)
-	}()
+		thisTunnel.handleTunnel(otherTunnel)
+	}(otherTunnel)
 
 	// do not close channel on exit
 	channel = nil
