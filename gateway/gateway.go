@@ -30,8 +30,8 @@ type gateway struct {
 	sshConfig        *ssh.ServerConfig
 	connectionsIndex map[string][]*connection
 	connectionsList  []*connection
-	lock             *sync.Mutex
-	closeOnce        sync.Once
+	lock             sync.Mutex
+	waitGroup        sync.WaitGroup
 }
 
 // creates a new instance of gateway
@@ -41,17 +41,16 @@ func Open(database db.Database, sshConfig *ssh.ServerConfig) (Gateway, error) {
 		sshConfig:        sshConfig,
 		connectionsIndex: make(map[string][]*connection),
 		connectionsList:  make([]*connection, 0),
-		lock:             &sync.Mutex{},
 	}, nil
 }
 
 // close the gateway instance
 func (self *gateway) Close() {
-	self.closeOnce.Do(func() {
-		for _, connection := range self.listConnections() {
-			connection.close()
-		}
-	})
+	defer self.waitGroup.Wait()
+
+	for _, connection := range self.listConnections() {
+		connection.close()
+	}
 }
 
 // handle an incoming ssh connection
@@ -84,8 +83,15 @@ func (self *gateway) HandleConnection(c net.Conn) {
 	self.addConnection(connection)
 
 	// handle requests and channels on this connection
-	go connection.handleRequests(requests)
-	go connection.handleChannels(channels)
+	self.waitGroup.Add(2)
+	go func() {
+		defer self.waitGroup.Done()
+		connection.handleRequests(requests)
+	}()
+	go func() {
+		defer self.waitGroup.Done()
+		connection.handleChannels(channels)
+	}()
 
 	// don't close connection on success
 	conn = nil
@@ -183,6 +189,20 @@ func (self *gateway) ListUsers() (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
+	func() {
+		self.lock.Lock()
+		defer self.lock.Unlock()
+		for _, user := range users {
+			user.Status = nil
+			user.Online = false
+			for _, connection := range self.connectionsList {
+				if connection.user == user.ID {
+					user.Online = true
+					break
+				}
+			}
+		}
+	}()
 	return map[string]interface{}{
 		"users": users,
 		"meta": map[string]interface{}{
@@ -206,15 +226,16 @@ func (self *gateway) GetUser(id string) (interface{}, error) {
 		defer self.lock.Unlock()
 
 		for _, connection := range self.connectionsList {
-			if connection.user != id {
-				continue
+			if connection.user == user.ID {
+				connections = append(connections, connection.gatherStatus())
 			}
-			connections = append(connections, connection.gatherStatus())
 		}
 	}()
 
+	user.Online = len(connections) > 0
+	user.Connections = connections
+
 	return map[string]interface{}{
-		"user":        user,
-		"connections": connections,
+		"user": user,
 	}, nil
 }

@@ -29,18 +29,25 @@ type connection struct {
 	tunnels              []*tunnel
 	tunnelsClosed        uint64
 	services             map[string]map[uint16]bool
-	lock                 *sync.Mutex
+	lock                 sync.Mutex
 	closeOnce            sync.Once
+	waitGroup            sync.WaitGroup
 	usage                *usageStats
 	permitPortForwarding bool
+	administrator        bool
 }
 
 func newConnection(gateway *gateway, conn *ssh.ServerConn, usage *usageStats) *connection {
 	log.Infof("new connection: user = %s, remote = %v", conn.User(), conn.RemoteAddr())
 
-	permitPortForwarding := true
-	if _, ok := conn.Permissions.Extensions["permit-port-forwarding"]; !ok {
-		permitPortForwarding = false
+	permitPortForwarding := false
+	if _, ok := conn.Permissions.Extensions["permit-port-forwarding"]; ok {
+		permitPortForwarding = true
+	}
+
+	administrator := false
+	if _, ok := conn.Permissions.Extensions["administrator"]; ok {
+		administrator = true
 	}
 
 	return &connection{
@@ -51,20 +58,17 @@ func newConnection(gateway *gateway, conn *ssh.ServerConn, usage *usageStats) *c
 		remoteAddr:           conn.RemoteAddr(),
 		localAddr:            conn.LocalAddr(),
 		services:             make(map[string]map[uint16]bool),
-		lock:                 &sync.Mutex{},
 		usage:                usage,
 		permitPortForwarding: permitPortForwarding,
+		administrator:        administrator,
 	}
 }
 
 // close the ssh connection
 func (self *connection) close() {
+	defer self.waitGroup.Wait()
 	self.closeOnce.Do(func() {
 		self.gateway.deleteConnection(self)
-
-		for _, tunnel := range self.listTunnels() {
-			tunnel.close()
-		}
 
 		if err := self.conn.Close(); err != nil {
 			log.Debugf("failed to close connection: %s", err)
@@ -243,7 +247,7 @@ func (self *connection) handleRequests(requests <-chan *ssh.Request) {
 	defer self.close()
 
 	for request := range requests {
-		go self.handleRequest(request)
+		self.handleRequest(request)
 	}
 }
 
@@ -251,7 +255,7 @@ func (self *connection) handleChannels(channels <-chan ssh.NewChannel) {
 	defer self.close()
 
 	for channel := range channels {
-		go self.handleChannel(channel)
+		self.handleChannel(channel)
 	}
 }
 
@@ -328,7 +332,12 @@ func (self *connection) handleChannel(newChannel ssh.NewChannel) {
 		log.Warningf("failed to reject channel: %s", err)
 		return
 	}
-	go ssh.DiscardRequests(requests)
+
+	self.waitGroup.Add(1)
+	go func() {
+		defer self.waitGroup.Done()
+		ssh.DiscardRequests(requests)
+	}()
 
 	if err := channel.Close(); err != nil {
 		log.Warningf("failed to close rejected channel: %s", err)
@@ -349,7 +358,11 @@ func (self *connection) handleSessionChannel(newChannel ssh.NewChannel) (bool, s
 		return true, 0, ""
 	}
 
-	go handleSession(self, channel, requests, newChannel.ChannelType(), newChannel.ExtraData())
+	self.waitGroup.Add(1)
+	go func() {
+		defer self.waitGroup.Done()
+		handleSession(self, channel, requests, newChannel.ChannelType(), newChannel.ExtraData())
+	}()
 	return true, 0, ""
 }
 
@@ -361,8 +374,8 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 	}
 
 	// look up connection by name
-	connection, host, port := self.gateway.lookupConnectionService(data.Host, uint16(data.Port))
-	if connection == nil {
+	otherConnection, host, port := self.gateway.lookupConnectionService(data.Host, uint16(data.Port))
+	if otherConnection == nil {
 		return false, ssh.ConnectionFailed, "service not found or not online"
 	}
 
@@ -380,7 +393,7 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 		OriginPort:    data.OriginPort,
 	}
 
-	tunnel2, err := connection.openTunnel("forwarded-tcpip", marshalTunnelData(data2), map[string]interface{}{
+	otherTunnel, err := otherConnection.openTunnel("forwarded-tcpip", marshalTunnelData(data2), map[string]interface{}{
 		"origin": data.OriginAddress,
 		"from": map[string]interface{}{
 			"address": self.remoteAddr.String(),
@@ -395,8 +408,8 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 		return false, ssh.ConnectionFailed, "failed to connect"
 	}
 	defer func() {
-		if tunnel2 != nil {
-			tunnel2.close()
+		if otherTunnel != nil {
+			otherTunnel.close()
 		}
 	}()
 
@@ -420,8 +433,8 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 	tunnel := newTunnel(self, channel, newChannel.ChannelType(), newChannel.ExtraData(), map[string]interface{}{
 		"origin": data.OriginAddress,
 		"to": map[string]interface{}{
-			"user":    connection.user,
-			"address": connection.remoteAddr.String(),
+			"user":    otherConnection.user,
+			"address": otherConnection.remoteAddr.String(),
 		},
 		"service": map[string]interface{}{
 			"host": data.Host,
@@ -431,12 +444,19 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 	self.addTunnel(tunnel)
 
 	// no failure
-	go tunnel.handleRequests(requests)
-	go tunnel.handleTunnel(tunnel2)
+	self.waitGroup.Add(2)
+	go func() {
+		defer self.waitGroup.Done()
+		tunnel.handleRequests(requests)
+	}()
+	go func() {
+		defer self.waitGroup.Done()
+		tunnel.handleTunnel(otherTunnel)
+	}()
 
 	// do not close channel on exit
 	channel = nil
-	tunnel2 = nil
+	otherTunnel = nil
 	return true, 0, ""
 }
 
@@ -460,7 +480,11 @@ func (self *connection) openTunnel(channelType string, extraData []byte, metadat
 	self.addTunnel(tunnel)
 
 	// no failure
-	go tunnel.handleRequests(requests)
+	self.waitGroup.Add(1)
+	go func() {
+		defer self.waitGroup.Done()
+		tunnel.handleRequests(requests)
+	}()
 
 	// do not close channel on exit
 	channel = nil

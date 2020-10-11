@@ -126,14 +126,23 @@ func run(c *cli.Context) error {
 		defer waitGroup.Done()
 		defer close(sshRunning)
 
+		var waitGroup2 sync.WaitGroup
+		defer waitGroup2.Wait()
+
 		log.Debugf("running and serving ssh")
 		for {
 			socket, err := sshListener.Accept()
 			if err != nil {
-				log.Errorf("failed to accept incoming tcp connection: %s", err)
+				if !quit {
+					log.Errorf("failed to accept incoming tcp connection: %s", err)
+				}
 				break
 			}
-			go gateway.HandleConnection(socket)
+			waitGroup2.Add(1)
+			go func() {
+				defer waitGroup2.Done()
+				gateway.HandleConnection(socket)
+			}()
 		}
 
 		log.Debugf("stop serving ssh")
@@ -202,6 +211,7 @@ func run(c *cli.Context) error {
 		if err := sshListener.Close(); err != nil {
 			log.Errorf("failed to close ssh listener: %s", err)
 		}
+		gateway.Close()
 	}()
 
 	if httpServer != nil {

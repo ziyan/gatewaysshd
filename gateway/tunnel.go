@@ -46,42 +46,35 @@ func (self *tunnel) handleRequests(requests <-chan *ssh.Request) {
 	defer self.close()
 
 	for request := range requests {
-		go self.handleRequest(request)
-	}
-}
+		log.Debugf("request received: type = %s, want_reply = %v, payload = %v", request.Type, request.WantReply, request.Payload)
 
-func (self *tunnel) handleRequest(request *ssh.Request) {
-	log.Debugf("request received: type = %s, want_reply = %v, payload = %v", request.Type, request.WantReply, request.Payload)
-
-	// reply to client
-	if request.WantReply {
-		if err := request.Reply(false, nil); err != nil {
-			log.Warningf("failed to reply to request: %s", err)
-			return
+		// reply to client
+		if request.WantReply {
+			if err := request.Reply(false, nil); err != nil {
+				log.Warningf("failed to reply to request: %s", err)
+			}
 		}
 	}
 }
 
-func (self *tunnel) handleTunnel(t2 *tunnel) {
-	defer t2.close()
+func (self *tunnel) handleTunnel(otherTunnel *tunnel) {
+	defer otherTunnel.close()
 	defer self.close()
 
-	done1 := make(chan struct{})
+	var waitGroup sync.WaitGroup
+	defer waitGroup.Wait()
+
+	waitGroup.Add(1)
 	go func() {
-		defer close(done1)
-		io.Copy(self.channel, t2.channel)
+		defer waitGroup.Done()
+		io.Copy(self.channel, otherTunnel.channel)
 	}()
 
-	done2 := make(chan struct{})
+	waitGroup.Add(1)
 	go func() {
-		defer close(done2)
-		io.Copy(t2.channel, self.channel)
+		defer waitGroup.Done()
+		io.Copy(otherTunnel.channel, self.channel)
 	}()
-
-	select {
-	case <-done1:
-	case <-done2:
-	}
 }
 
 type tunnelStatus struct {

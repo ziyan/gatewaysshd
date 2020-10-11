@@ -130,6 +130,15 @@ func (self *service) handleCommand(command []string) error {
 	case len(command) == 1 && command[0] == "reportStatus":
 		return self.reportStatus()
 	}
+	if !self.connection.administrator {
+		return ErrInvalidCommand
+	}
+	switch {
+	case len(command) == 1 && command[0] == "listUsers":
+		return self.listUsers()
+	case len(command) == 2 && command[0] == "getUser":
+		return self.getUser(command[1])
+	}
 	return ErrInvalidCommand
 }
 
@@ -140,6 +149,14 @@ func (self *service) help() error {
 		fmt.Sprintf("    ping - ping server"),
 		fmt.Sprintf("    status - show gateway status"),
 		"",
+	}
+
+	if self.connection.administrator {
+		content = append(content, []string{
+			fmt.Sprintf("    listUsers - list all users"),
+			fmt.Sprintf("    getUser <username> - get details about a user"),
+			"",
+		}...)
 	}
 
 	content = append(content, []string{
@@ -194,4 +211,20 @@ func (self *service) reportStatus() error {
 
 	// save the result
 	return self.connection.reportStatus(status)
+}
+
+func (self *service) listUsers() error {
+	output, err := self.connection.gateway.ListUsers()
+	if err != nil {
+		return err
+	}
+	return self.marshal(output)
+}
+
+func (self *service) getUser(userId string) error {
+	output, err := self.connection.gateway.GetUser(userId)
+	if err != nil {
+		return err
+	}
+	return self.marshal(output)
 }

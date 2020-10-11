@@ -77,8 +77,17 @@ type User struct {
 	// reported status
 	Status Status `json:"status,omitempty"`
 
+	// whether the user is an administrator
+	Administrator bool `json:"administrator,omitempty"`
+
 	// whether the user account has been disabled
 	Disabled bool `json:"disabled,omitempty"`
+
+	// whther the user is online, not saved in database
+	Online bool `json:"online,omitempty" gorm:"-"`
+
+	// current connections, not saved in database
+	Connections interface{} `json:"connections,omitempty" gorm:"-"`
 }
 
 func (self *User) TableName() string {

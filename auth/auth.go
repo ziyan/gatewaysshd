@@ -76,6 +76,10 @@ func (self *authenticator) authenticate(meta ssh.ConnMetadata, publicKey ssh.Pub
 		return nil, ErrInvalidCredentials
 	}
 
+	if user.Administrator {
+		permissions.Extensions["administrator"] = ""
+	}
+
 	// successful auth
 	log.Infof("successful, username = %s, extensions = %q", meta.User(), permissions.Extensions)
 	return permissions, nil
