@@ -55,7 +55,7 @@ func (self *database) Close() error {
 // for logging from gorm package
 func (self *database) Print(values ...interface{}) {
 	if len(values) < 2 {
-		log.Debugf("%v", values)
+		log.Debugf("%q", values)
 		return
 	}
 	component := values[0].(string)
@@ -70,7 +70,7 @@ func (self *database) Print(values ...interface{}) {
 		sql := values[1].(string)
 		variables := values[2]
 		rowsAffected := values[3].(int64)
-		log.Debugf("took %s to execute sql %s, variables %v, affected %d rows, called from %s", duration, sql, variables, rowsAffected, filenameWithLine)
+		log.Debugf("took %s to execute sql %s, variables %q, affected %d rows, called from %s", duration, sql, variables, rowsAffected, filenameWithLine)
 	case "error":
 		if len(values) != 1 {
 			return
@@ -78,8 +78,8 @@ func (self *database) Print(values ...interface{}) {
 		err := values[0].(error)
 		log.Errorf("%s, called from %s", err, filenameWithLine)
 	case "log":
-		log.Debugf("%v, called from %s", values, filenameWithLine)
+		log.Debugf("%q, called from %s", values, filenameWithLine)
 	default:
-		log.Debugf("%v", values)
+		log.Debugf("%q", values)
 	}
 }

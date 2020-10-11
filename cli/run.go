@@ -129,9 +129,6 @@ func run(c *cli.Context) error {
 		log.Debugf("running and serving ssh")
 		for {
 			socket, err := sshListener.Accept()
-			if quit {
-				break
-			}
 			if err != nil {
 				log.Errorf("failed to accept incoming tcp connection: %s", err)
 				break

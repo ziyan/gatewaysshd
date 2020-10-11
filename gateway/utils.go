@@ -1,8 +1,10 @@
 package gateway
 
 import (
+	"encoding/csv"
 	"errors"
 	"net"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -174,4 +176,14 @@ func (self *wrappedConn) SetReadDeadline(t time.Time) error {
 
 func (self *wrappedConn) SetWriteDeadline(t time.Time) error {
 	return self.conn.SetWriteDeadline(t)
+}
+
+func splitCommand(command string) []string {
+	reader := csv.NewReader(strings.NewReader(command))
+	reader.Comma = ' '
+	fields, err := reader.Read()
+	if err != nil {
+		return nil
+	}
+	return fields
 }

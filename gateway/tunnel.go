@@ -8,8 +8,8 @@ import (
 )
 
 // a tunnel within a ssh connection
-type Tunnel struct {
-	connection  *Connection
+type tunnel struct {
+	connection  *connection
 	channel     ssh.Channel
 	channelType string
 	extraData   []byte
@@ -18,9 +18,9 @@ type Tunnel struct {
 	metadata    map[string]interface{}
 }
 
-func newTunnel(connection *Connection, channel ssh.Channel, channelType string, extraData []byte, metadata map[string]interface{}) *Tunnel {
+func newTunnel(connection *connection, channel ssh.Channel, channelType string, extraData []byte, metadata map[string]interface{}) *tunnel {
 	log.Infof("new tunnel: user = %s, remote = %v, type = %s, metadata = %v", connection.user, connection.remoteAddr, channelType, metadata)
-	return &Tunnel{
+	return &tunnel{
 		connection:  connection,
 		channel:     channel,
 		channelType: channelType,
@@ -30,7 +30,7 @@ func newTunnel(connection *Connection, channel ssh.Channel, channelType string, 
 }
 
 // close the tunnel
-func (self *Tunnel) Close() {
+func (self *tunnel) close() {
 	self.closeOnce.Do(func() {
 		if err := self.channel.Close(); err != nil {
 			log.Warningf("failed to close tunnel: %s", err)
@@ -42,15 +42,15 @@ func (self *Tunnel) Close() {
 	})
 }
 
-func (self *Tunnel) handleRequests(requests <-chan *ssh.Request) {
-	defer self.Close()
+func (self *tunnel) handleRequests(requests <-chan *ssh.Request) {
+	defer self.close()
 
 	for request := range requests {
 		go self.handleRequest(request)
 	}
 }
 
-func (self *Tunnel) handleRequest(request *ssh.Request) {
+func (self *tunnel) handleRequest(request *ssh.Request) {
 	log.Debugf("request received: type = %s, want_reply = %v, payload = %v", request.Type, request.WantReply, request.Payload)
 
 	// reply to client
@@ -62,9 +62,9 @@ func (self *Tunnel) handleRequest(request *ssh.Request) {
 	}
 }
 
-func (self *Tunnel) handleTunnel(t2 *Tunnel) {
-	defer t2.Close()
-	defer self.Close()
+func (self *tunnel) handleTunnel(t2 *tunnel) {
+	defer t2.close()
+	defer self.close()
 
 	done1 := make(chan struct{})
 	go func() {
@@ -89,7 +89,7 @@ type tunnelStatus struct {
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }
 
-func (self *Tunnel) gatherStatus() *tunnelStatus {
+func (self *tunnel) gatherStatus() *tunnelStatus {
 	return &tunnelStatus{
 		Type:     self.channelType,
 		Metadata: self.metadata,

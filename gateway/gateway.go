@@ -15,37 +15,47 @@ import (
 var log = logging.MustGetLogger("gateway")
 
 // an instance of gateway, contains runtime states
-type Gateway struct {
+type Gateway interface {
+	Close()
+
+	HandleConnection(net.Conn)
+	ScavengeConnections(time.Duration)
+
+	ListUsers() (interface{}, error)
+	GetUser(string) (interface{}, error)
+}
+
+type gateway struct {
 	database         db.Database
 	sshConfig        *ssh.ServerConfig
-	connectionsIndex map[string][]*Connection
-	connectionsList  []*Connection
+	connectionsIndex map[string][]*connection
+	connectionsList  []*connection
 	lock             *sync.Mutex
 	closeOnce        sync.Once
 }
 
 // creates a new instance of gateway
-func Open(database db.Database, sshConfig *ssh.ServerConfig) (*Gateway, error) {
-	return &Gateway{
+func Open(database db.Database, sshConfig *ssh.ServerConfig) (Gateway, error) {
+	return &gateway{
 		database:         database,
 		sshConfig:        sshConfig,
-		connectionsIndex: make(map[string][]*Connection),
-		connectionsList:  make([]*Connection, 0),
+		connectionsIndex: make(map[string][]*connection),
+		connectionsList:  make([]*connection, 0),
 		lock:             &sync.Mutex{},
 	}, nil
 }
 
 // close the gateway instance
-func (self *Gateway) Close() {
+func (self *gateway) Close() {
 	self.closeOnce.Do(func() {
-		for _, connection := range self.Connections() {
-			connection.Close()
+		for _, connection := range self.listConnections() {
+			connection.close()
 		}
 	})
 }
 
 // handle an incoming ssh connection
-func (self *Gateway) HandleConnection(c net.Conn) {
+func (self *gateway) HandleConnection(c net.Conn) {
 	log.Infof("new tcp connection: remote = %s, local = %s", c.RemoteAddr(), c.LocalAddr())
 	defer func() {
 		if c != nil {
@@ -83,19 +93,19 @@ func (self *Gateway) HandleConnection(c net.Conn) {
 }
 
 // add connection to the list of connections
-func (self *Gateway) addConnection(c *Connection) {
+func (self *gateway) addConnection(c *connection) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
-	self.connectionsIndex[c.user] = append([]*Connection{c}, self.connectionsIndex[c.user]...)
-	self.connectionsList = append([]*Connection{c}, self.connectionsList...)
+	self.connectionsIndex[c.user] = append([]*connection{c}, self.connectionsIndex[c.user]...)
+	self.connectionsList = append([]*connection{c}, self.connectionsList...)
 }
 
-func (self *Gateway) deleteConnection(c *Connection) {
+func (self *gateway) deleteConnection(c *connection) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
-	connections := make([]*Connection, 0, len(self.connectionsIndex[c.user]))
+	connections := make([]*connection, 0, len(self.connectionsIndex[c.user]))
 	for _, connection := range self.connectionsIndex[c.user] {
 		if connection != c {
 			connections = append(connections, connection)
@@ -103,7 +113,7 @@ func (self *Gateway) deleteConnection(c *Connection) {
 	}
 	self.connectionsIndex[c.user] = connections
 
-	connections = make([]*Connection, 0, len(self.connectionsList))
+	connections = make([]*connection, 0, len(self.connectionsList))
 	for _, connection := range self.connectionsList {
 		if connection != c {
 			connections = append(connections, connection)
@@ -112,7 +122,7 @@ func (self *Gateway) deleteConnection(c *Connection) {
 	self.connectionsList = connections
 }
 
-func (self *Gateway) lookupConnectionService(host string, port uint16) (*Connection, string, uint16) {
+func (self *gateway) lookupConnectionService(host string, port uint16) (*connection, string, uint16) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
@@ -134,27 +144,27 @@ func (self *Gateway) lookupConnectionService(host string, port uint16) (*Connect
 }
 
 // returns a list of connections
-func (self *Gateway) Connections() []*Connection {
+func (self *gateway) listConnections() []*connection {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
-	connections := make([]*Connection, len(self.connectionsList))
+	connections := make([]*connection, len(self.connectionsList))
 	copy(connections, self.connectionsList)
 	return connections
 }
 
 // scavenge timed out connections
-func (self *Gateway) ScavengeConnections(timeout time.Duration) {
-	for _, connection := range self.Connections() {
-		idle := time.Since(connection.Used())
+func (self *gateway) ScavengeConnections(timeout time.Duration) {
+	for _, connection := range self.listConnections() {
+		idle := time.Since(connection.getUsed())
 		if idle > timeout {
 			log.Infof("scavenge: connection for %s timed out after %d seconds", connection.user, uint64(idle.Seconds()))
-			connection.Close()
+			connection.close()
 		}
 	}
 }
 
-func (self *Gateway) gatherStatus() map[string]interface{} {
+func (self *gateway) gatherStatus() map[string]interface{} {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
@@ -168,7 +178,7 @@ func (self *Gateway) gatherStatus() map[string]interface{} {
 	}
 }
 
-func (self *Gateway) ListUsers() (interface{}, error) {
+func (self *gateway) ListUsers() (interface{}, error) {
 	users, err := self.database.ListUsers()
 	if err != nil {
 		return nil, err
@@ -181,7 +191,7 @@ func (self *Gateway) ListUsers() (interface{}, error) {
 	}, nil
 }
 
-func (self *Gateway) GetUser(id string) (interface{}, error) {
+func (self *gateway) GetUser(id string) (interface{}, error) {
 	user, err := self.database.GetUser(id)
 	if err != nil {
 		return nil, err

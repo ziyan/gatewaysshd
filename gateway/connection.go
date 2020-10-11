@@ -19,59 +19,51 @@ var (
 )
 
 // a ssh connection
-type Connection struct {
-	id             string
-	gateway        *Gateway
-	conn           *ssh.ServerConn
-	user           string
-	remoteAddr     net.Addr
-	localAddr      net.Addr
-	sessions       []*Session
-	sessionsClosed uint64
-	tunnels        []*Tunnel
-	tunnelsClosed  uint64
-	services       map[string]map[uint16]bool
-	lock           *sync.Mutex
-	closeOnce      sync.Once
-	usage          *usageStats
-	admin          bool
-	status         json.RawMessage
+type connection struct {
+	id                   string
+	gateway              *gateway
+	conn                 *ssh.ServerConn
+	user                 string
+	remoteAddr           net.Addr
+	localAddr            net.Addr
+	tunnels              []*tunnel
+	tunnelsClosed        uint64
+	services             map[string]map[uint16]bool
+	lock                 *sync.Mutex
+	closeOnce            sync.Once
+	usage                *usageStats
+	permitPortForwarding bool
 }
 
-func newConnection(gateway *Gateway, conn *ssh.ServerConn, usage *usageStats) *Connection {
+func newConnection(gateway *gateway, conn *ssh.ServerConn, usage *usageStats) *connection {
 	log.Infof("new connection: user = %s, remote = %v", conn.User(), conn.RemoteAddr())
 
-	admin := true
+	permitPortForwarding := true
 	if _, ok := conn.Permissions.Extensions["permit-port-forwarding"]; !ok {
-		admin = false
+		permitPortForwarding = false
 	}
 
-	connection := &Connection{
-		id:         ksuid.New().String(),
-		gateway:    gateway,
-		conn:       conn,
-		user:       conn.User(),
-		remoteAddr: conn.RemoteAddr(),
-		localAddr:  conn.LocalAddr(),
-		services:   make(map[string]map[uint16]bool),
-		lock:       &sync.Mutex{},
-		usage:      usage,
-		admin:      admin,
+	return &connection{
+		id:                   ksuid.New().String(),
+		gateway:              gateway,
+		conn:                 conn,
+		user:                 conn.User(),
+		remoteAddr:           conn.RemoteAddr(),
+		localAddr:            conn.LocalAddr(),
+		services:             make(map[string]map[uint16]bool),
+		lock:                 &sync.Mutex{},
+		usage:                usage,
+		permitPortForwarding: permitPortForwarding,
 	}
-	return connection
 }
 
 // close the ssh connection
-func (self *Connection) Close() {
+func (self *connection) close() {
 	self.closeOnce.Do(func() {
 		self.gateway.deleteConnection(self)
 
-		for _, session := range self.Sessions() {
-			session.Close()
-		}
-
-		for _, tunnel := range self.Tunnels() {
-			tunnel.Close()
+		for _, tunnel := range self.listTunnels() {
+			tunnel.close()
 		}
 
 		if err := self.conn.Close(); err != nil {
@@ -82,61 +74,29 @@ func (self *Connection) Close() {
 	})
 }
 
-// sessions within a ssh connection
-func (self *Connection) Sessions() []*Session {
-	self.lock.Lock()
-	defer self.lock.Unlock()
-
-	sessions := make([]*Session, len(self.sessions))
-	copy(sessions, self.sessions)
-	return sessions
-}
-
-func (self *Connection) addSession(s *Session) {
-	self.lock.Lock()
-	defer self.lock.Unlock()
-
-	self.sessions = append([]*Session{s}, self.sessions...)
-}
-
-func (self *Connection) deleteSession(s *Session) {
-	self.lock.Lock()
-	defer self.lock.Unlock()
-
-	// filter the list of channels
-	sessions := make([]*Session, 0, len(self.sessions))
-	for _, session := range self.sessions {
-		if session != s {
-			sessions = append(sessions, session)
-		}
-	}
-	self.sessions = sessions
-	self.sessionsClosed += 1
-}
-
 // tunnels within a ssh connection
-func (self *Connection) Tunnels() []*Tunnel {
+func (self *connection) listTunnels() []*tunnel {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
-	tunnels := make([]*Tunnel, len(self.tunnels))
+	tunnels := make([]*tunnel, len(self.tunnels))
 	copy(tunnels, self.tunnels)
 	return tunnels
 }
 
-func (self *Connection) addTunnel(t *Tunnel) {
+func (self *connection) addTunnel(t *tunnel) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
-	self.tunnels = append([]*Tunnel{t}, self.tunnels...)
+	self.tunnels = append([]*tunnel{t}, self.tunnels...)
 }
 
-func (self *Connection) deleteTunnel(t *Tunnel) {
+func (self *connection) deleteTunnel(t *tunnel) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
 	// filter the list of channels
-	tunnels := make([]*Tunnel, 0, len(self.tunnels))
+	tunnels := make([]*tunnel, 0, len(self.tunnels))
 	for _, tunnel := range self.tunnels {
 		if tunnel != t {
 			tunnels = append(tunnels, tunnel)
@@ -147,7 +107,7 @@ func (self *Connection) deleteTunnel(t *Tunnel) {
 }
 
 // returns the last used time of the connection
-func (self *Connection) Used() time.Time {
+func (self *connection) getUsed() time.Time {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
@@ -155,7 +115,7 @@ func (self *Connection) Used() time.Time {
 }
 
 // returns the list of services this connection advertises
-func (self *Connection) Services() map[string][]uint16 {
+func (self *connection) listServices() map[string][]uint16 {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
@@ -171,11 +131,15 @@ func (self *Connection) Services() map[string][]uint16 {
 	return services
 }
 
-func (self *Connection) reportStatus(status json.RawMessage) {
-	self.lock.Lock()
-	defer self.lock.Unlock()
-
-	self.status = status
+func (self *connection) reportStatus(status json.RawMessage) error {
+	if _, err := self.gateway.database.PutUser(self.user, func(model *db.User) error {
+		model.Status = db.Status(status)
+		return nil
+	}); err != nil {
+		log.Errorf("failed to save user in database: %s", err)
+		return err
+	}
+	return nil
 }
 
 type connectionStatus struct {
@@ -184,12 +148,9 @@ type connectionStatus struct {
 	Created time.Time `json:"created,omitempty"`
 	Used    time.Time `json:"used,omitempty"`
 
-	User    string `json:"user,omitempty"`
-	Admin   bool   `json:"admin,omitempty"`
-	Address string `json:"address,omitempty"`
-
-	Sessions       []*sessionStatus `json:"sessions,omitempty"`
-	SessionsClosed uint64           `json:"sessions_closed,omitempty"`
+	User                 string `json:"user,omitempty"`
+	PermitPortForwarding bool   `json:"permitPortForwarding,omitempty"`
+	Address              string `json:"address,omitempty"`
 
 	Tunnels       []*tunnelStatus `json:"tunnels,omitempty"`
 	TunnelsClosed uint64          `json:"tunnels_closed,omitempty"`
@@ -203,7 +164,7 @@ type connectionStatus struct {
 	Services map[string][]uint16 `json:"tunnels_closed,omitempty"`
 }
 
-func (self *Connection) gatherStatus() *connectionStatus {
+func (self *connection) gatherStatus() *connectionStatus {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
@@ -222,31 +183,24 @@ func (self *Connection) gatherStatus() *connectionStatus {
 		tunnels = append(tunnels, tunnel.gatherStatus())
 	}
 
-	sessions := make([]*sessionStatus, 0, len(self.sessions))
-	for _, session := range self.sessions {
-		sessions = append(sessions, session.gatherStatus())
-	}
-
 	return &connectionStatus{
-		ID:             self.id,
-		User:           self.user,
-		Admin:          self.admin,
-		Address:        self.remoteAddr.String(),
-		Sessions:       sessions,
-		SessionsClosed: self.sessionsClosed,
-		Tunnels:        tunnels,
-		TunnelsClosed:  self.tunnelsClosed,
-		Created:        self.usage.created,
-		Used:           self.usage.used,
-		UpTime:         uint64(time.Since(self.usage.created).Seconds()),
-		IdleTime:       uint64(time.Since(self.usage.used).Seconds()),
-		BytesRead:      self.usage.bytesRead,
-		BytesWritten:   self.usage.bytesWritten,
-		Services:       services,
+		ID:                   self.id,
+		User:                 self.user,
+		PermitPortForwarding: self.permitPortForwarding,
+		Address:              self.remoteAddr.String(),
+		Tunnels:              tunnels,
+		TunnelsClosed:        self.tunnelsClosed,
+		Created:              self.usage.created,
+		Used:                 self.usage.used,
+		UpTime:               uint64(time.Since(self.usage.created).Seconds()),
+		IdleTime:             uint64(time.Since(self.usage.used).Seconds()),
+		BytesRead:            self.usage.bytesRead,
+		BytesWritten:         self.usage.bytesWritten,
+		Services:             services,
 	}
 }
 
-func (self *Connection) lookupService(host string, port uint16) bool {
+func (self *connection) lookupService(host string, port uint16) bool {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
@@ -257,7 +211,7 @@ func (self *Connection) lookupService(host string, port uint16) bool {
 	return self.services[host][port]
 }
 
-func (self *Connection) registerService(host string, port uint16) error {
+func (self *connection) registerService(host string, port uint16) error {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
@@ -273,7 +227,7 @@ func (self *Connection) registerService(host string, port uint16) error {
 	return nil
 }
 
-func (self *Connection) deregisterService(host string, port uint16) error {
+func (self *connection) deregisterService(host string, port uint16) error {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
@@ -285,23 +239,23 @@ func (self *Connection) deregisterService(host string, port uint16) error {
 	return nil
 }
 
-func (self *Connection) handleRequests(requests <-chan *ssh.Request) {
-	defer self.Close()
+func (self *connection) handleRequests(requests <-chan *ssh.Request) {
+	defer self.close()
 
 	for request := range requests {
 		go self.handleRequest(request)
 	}
 }
 
-func (self *Connection) handleChannels(channels <-chan ssh.NewChannel) {
-	defer self.Close()
+func (self *connection) handleChannels(channels <-chan ssh.NewChannel) {
+	defer self.close()
 
 	for channel := range channels {
 		go self.handleChannel(channel)
 	}
 }
 
-func (self *Connection) handleRequest(request *ssh.Request) {
+func (self *connection) handleRequest(request *ssh.Request) {
 	log.Debugf("request received: type = %s, want_reply = %v, payload = %v", request.Type, request.WantReply, request.Payload)
 
 	ok := false
@@ -348,7 +302,7 @@ func (self *Connection) handleRequest(request *ssh.Request) {
 	}
 }
 
-func (self *Connection) handleChannel(newChannel ssh.NewChannel) {
+func (self *connection) handleChannel(newChannel ssh.NewChannel) {
 	log.Debugf("new channel: type = %s, data = %v", newChannel.ChannelType(), newChannel.ExtraData())
 
 	ok := false
@@ -382,7 +336,7 @@ func (self *Connection) handleChannel(newChannel ssh.NewChannel) {
 	}
 }
 
-func (self *Connection) handleSessionChannel(newChannel ssh.NewChannel) (bool, ssh.RejectionReason, string) {
+func (self *connection) handleSessionChannel(newChannel ssh.NewChannel) (bool, ssh.RejectionReason, string) {
 	if len(newChannel.ExtraData()) > 0 {
 		// do not accept extra data in connection channel request
 		return false, ssh.Prohibited, "extra data not allowed"
@@ -395,28 +349,11 @@ func (self *Connection) handleSessionChannel(newChannel ssh.NewChannel) (bool, s
 		return true, 0, ""
 	}
 
-	// cannot return false from this point on
-	// also need to accepted close the channel
-	defer func() {
-		if channel != nil {
-			if err := channel.Close(); err != nil {
-				log.Warningf("failed to close accepted channel: %s", err)
-			}
-		}
-	}()
-
-	session := newSession(self, channel, newChannel.ChannelType(), newChannel.ExtraData())
-	self.addSession(session)
-
-	// no failure
-	go session.handleRequests(requests)
-
-	// do not close channel on exit
-	channel = nil
+	go handleSession(self, channel, requests, newChannel.ChannelType(), newChannel.ExtraData())
 	return true, 0, ""
 }
 
-func (self *Connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ssh.RejectionReason, string) {
+func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ssh.RejectionReason, string) {
 
 	data, err := unmarshalTunnelData(newChannel.ExtraData())
 	if err != nil {
@@ -430,7 +367,7 @@ func (self *Connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 	}
 
 	// see if this connection is allowed
-	if !self.admin {
+	if !self.permitPortForwarding {
 		log.Warningf("no permission to port forward: user = %s", self.user)
 		return false, ssh.Prohibited, "permission denied"
 	}
@@ -459,7 +396,7 @@ func (self *Connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 	}
 	defer func() {
 		if tunnel2 != nil {
-			tunnel2.Close()
+			tunnel2.close()
 		}
 	}()
 
@@ -504,7 +441,7 @@ func (self *Connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 }
 
 // open a channel from the server to the client side
-func (self *Connection) openTunnel(channelType string, extraData []byte, metadata map[string]interface{}) (*Tunnel, error) {
+func (self *connection) openTunnel(channelType string, extraData []byte, metadata map[string]interface{}) (*tunnel, error) {
 	log.Debugf("opening channel: type = %s, data = %v", channelType, extraData)
 
 	channel, requests, err := self.conn.OpenChannel(channelType, extraData)
@@ -528,16 +465,4 @@ func (self *Connection) openTunnel(channelType string, extraData []byte, metadat
 	// do not close channel on exit
 	channel = nil
 	return tunnel, nil
-}
-
-func (self *Connection) updateUser() {
-	self.lock.Lock()
-	defer self.lock.Unlock()
-
-	if _, err := self.gateway.database.PutUser(self.user, func(model *db.User) error {
-		model.Status = db.Status(self.status)
-		return nil
-	}); err != nil {
-		log.Errorf("failed to save user in database: %s", err)
-	}
 }

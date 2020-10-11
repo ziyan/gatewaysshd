@@ -11,7 +11,7 @@ import (
 var flags = []cli.Flag{
 	cli.StringFlag{
 		Name:  "log-level",
-		Value: "INFO",
+		Value: "DEBUG",
 		Usage: "log level",
 	},
 	cli.StringFlag{
