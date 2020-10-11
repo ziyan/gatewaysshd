@@ -166,7 +166,7 @@ type connectionStatus struct {
 	BytesRead    uint64 `json:"bytes_read"`
 	BytesWritten uint64 `json:"bytes_written"`
 
-	Services map[string][]uint16 `json:"tunnels_closed,omitempty"`
+	Services map[string][]uint16 `json:"services,omitempty"`
 }
 
 func (self *connection) gatherStatus() *connectionStatus {
