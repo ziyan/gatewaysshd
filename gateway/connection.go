@@ -18,6 +18,7 @@ var (
 	ErrServiceNotFound          = errors.New("gateway: service not found")
 	ErrExtraDataNotAllowed      = errors.New("gateway: extra data not allowed")
 	ErrUnknownChannelType       = errors.New("gateway: unknown channel type")
+	ErrPermissionDenied         = errors.New("gateway: permission denied")
 )
 
 // a ssh connection
@@ -252,7 +253,7 @@ func (self *connection) handleRequests(requests <-chan *ssh.Request) {
 
 	for request := range requests {
 		if err := self.handleRequest(request); err != nil {
-			log.Errorf("failed to handle request on connection %s user %s: %s", self.id, self.user, err)
+			log.Warningf("failed to handle request on connection %s user %s: %s", self.id, self.user, err)
 			break
 		}
 	}
@@ -263,7 +264,7 @@ func (self *connection) handleChannels(channels <-chan ssh.NewChannel) {
 
 	for channel := range channels {
 		if err := self.handleChannel(channel); err != nil {
-			log.Errorf("failed to handle channel on connection %s user %s: %s", self.id, self.user, err)
+			log.Warningf("failed to handle channel on connection %s user %s: %s", self.id, self.user, err)
 			break
 		}
 	}
@@ -341,7 +342,7 @@ func (self *connection) handleChannel(newChannel ssh.NewChannel) error {
 	// this is because Reject() leaks
 	channel, requests, err := newChannel.Accept()
 	if err != nil {
-		log.Warningf("failed to reject channel: %s", err)
+		log.Errorf("failed to reject channel: %s", err)
 		return err
 	}
 
@@ -352,7 +353,7 @@ func (self *connection) handleChannel(newChannel ssh.NewChannel) error {
 	}()
 
 	if err := channel.Close(); err != nil {
-		log.Warningf("failed to close rejected channel: %s", err)
+		log.Errorf("failed to close rejected channel: %s", err)
 		return err
 	}
 	return nil
@@ -386,16 +387,16 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 		return false, ssh.UnknownChannelType, "failed to decode extra data", err
 	}
 
+	// see if this connection is allowed
+	if !self.permitPortForwarding {
+		log.Errorf("no permission to port forward: user = %s", self.user)
+		return false, ssh.Prohibited, "permission denied", ErrPermissionDenied
+	}
+
 	// look up connection by name
 	otherConnection, host, port := self.gateway.lookupConnectionService(data.Host, uint16(data.Port))
 	if otherConnection == nil {
 		return false, ssh.ConnectionFailed, "service not found or not online", nil
-	}
-
-	// see if this connection is allowed
-	if !self.permitPortForwarding {
-		log.Warningf("no permission to port forward: user = %s", self.user)
-		return false, ssh.Prohibited, "permission denied", nil
 	}
 
 	// found the service, attempt to open a channel

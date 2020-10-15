@@ -32,8 +32,8 @@ func handleSession(connection *connection, channel ssh.Channel, requests <-chan 
 		// reply to client
 		if request.WantReply {
 			if err := request.Reply(ok, nil); err != nil {
-				log.Warningf("failed to reply to request: %s", err)
-				continue
+				log.Errorf("failed to reply to request: %s", err)
+				break
 			}
 		}
 
@@ -44,7 +44,7 @@ func handleSession(connection *connection, channel ssh.Channel, requests <-chan 
 			continue
 		}
 
-		func() {
+		if err := func() error {
 			success := false
 			defer func() {
 				if err := channel.CloseWrite(); err != nil {
@@ -69,22 +69,25 @@ func handleSession(connection *connection, channel ssh.Channel, requests <-chan 
 			if request.Type == "exec" {
 				var execute struct{ Command string }
 				if err := ssh.Unmarshal(request.Payload, &execute); err != nil {
-					log.Warningf("failed to unmarshal request payload: %s: %v", err, request.Payload)
-					return
+					log.Errorf("failed to unmarshal request payload: %s: %v", err, request.Payload)
+					return err
 				}
 				command = execute.Command
 			}
 
 			// do actual work here
 			if err := runService(command, connection, channel); err != nil {
-				log.Warningf("command %s failed: %s", command, err)
-				if _, err := fmt.Fprintf(channel.Stderr(), "ERROR: %s\r\n", err); err != nil {
-					log.Warningf("failed to write to stdout: %s", err)
+				log.Errorf("command %s failed: %s", command, err)
+				if _, err2 := fmt.Fprintf(channel.Stderr(), "ERROR: %s\r\n", err); err2 != nil {
+					log.Errorf("failed to write to stdout: %s", err2)
 				}
-				return
+				return err
 			}
 
 			success = true
-		}()
+			return nil
+		}(); err != nil {
+			break
+		}
 	}
 }
