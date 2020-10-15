@@ -164,7 +164,7 @@ func (self *gateway) ScavengeConnections(timeout time.Duration) {
 	for _, connection := range self.listConnections() {
 		idle := time.Since(connection.getUsed())
 		if idle > timeout {
-			log.Infof("scavenge: connection for %s timed out after %d seconds", connection.user, uint64(idle.Seconds()))
+			log.Infof("scavenge: connection for %s timed out after %s", connection.user, idle)
 			connection.close()
 		}
 	}

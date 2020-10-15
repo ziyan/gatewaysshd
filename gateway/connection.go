@@ -14,8 +14,10 @@ import (
 )
 
 var (
-	ErrServiceAlreadyRegistered = errors.New("gatewaysshd: service already registered")
-	ErrServiceNotFound          = errors.New("gatewaysshd: service not found")
+	ErrServiceAlreadyRegistered = errors.New("gateway: service already registered")
+	ErrServiceNotFound          = errors.New("gateway: service not found")
+	ErrExtraDataNotAllowed      = errors.New("gateway: extra data not allowed")
+	ErrUnknownChannelType       = errors.New("gateway: unknown channel type")
 )
 
 // a ssh connection
@@ -249,7 +251,10 @@ func (self *connection) handleRequests(requests <-chan *ssh.Request) {
 	defer self.close()
 
 	for request := range requests {
-		self.handleRequest(request)
+		if err := self.handleRequest(request); err != nil {
+			log.Errorf("failed to handle request on connection %s user %s: %s", self.id, self.user, err)
+			break
+		}
 	}
 }
 
@@ -257,11 +262,14 @@ func (self *connection) handleChannels(channels <-chan ssh.NewChannel) {
 	defer self.close()
 
 	for channel := range channels {
-		self.handleChannel(channel)
+		if err := self.handleChannel(channel); err != nil {
+			log.Errorf("failed to handle channel on connection %s user %s: %s", self.id, self.user, err)
+			break
+		}
 	}
 }
 
-func (self *connection) handleRequest(request *ssh.Request) {
+func (self *connection) handleRequest(request *ssh.Request) error {
 	log.Debugf("request received: type = %s, want_reply = %v, payload = %v", request.Type, request.WantReply, request.Payload)
 
 	ok := false
@@ -269,61 +277,63 @@ func (self *connection) handleRequest(request *ssh.Request) {
 	case "tcpip-forward":
 		request, err := unmarshalForwardRequest(request.Payload)
 		if err != nil {
-			log.Warningf("failed to decode request: %s", err)
-			break
+			log.Errorf("failed to decode request: %s", err)
+			return err
 		}
 
 		if request.Port == 0 {
-			log.Warningf("requested forwarding port is not allowed: %d", request.Port)
-			break
+			log.Errorf("requested forwarding port is not allowed: %d", request.Port)
+			return err
 		}
 
 		if err := self.registerService(request.Host, uint16(request.Port)); err != nil {
-			log.Warningf("failed to register service in connection: %s", err)
-			break
+			log.Errorf("failed to register service in connection: %s", err)
+			return err
 		}
 
 		ok = true
-
 	case "cancel-tcpip-forward":
 		request, err := unmarshalForwardRequest(request.Payload)
 		if err != nil {
-			log.Warningf("failed to decode request: %s", err)
-			break
+			log.Errorf("failed to decode request: %s", err)
+			return err
 		}
 
 		if err := self.deregisterService(request.Host, uint16(request.Port)); err != nil {
-			log.Warningf("failed to register service in connection: %s", err)
-			break
+			log.Errorf("failed to register service in connection: %s", err)
+			return err
 		}
 
 		ok = true
-
 	}
-
 	if request.WantReply {
 		if err := request.Reply(ok, nil); err != nil {
-			log.Warningf("failed to reply to request: %s", err)
+			log.Errorf("failed to reply to request: %s", err)
+			return err
 		}
 	}
+	return nil
 }
 
-func (self *connection) handleChannel(newChannel ssh.NewChannel) {
+func (self *connection) handleChannel(newChannel ssh.NewChannel) error {
 	log.Debugf("new channel: type = %s, data = %v", newChannel.ChannelType(), newChannel.ExtraData())
 
 	ok := false
 	rejection := ssh.UnknownChannelType
 	message := "unknown channel type"
+	err := ErrUnknownChannelType
 
 	switch newChannel.ChannelType() {
 	case "session":
-		ok, rejection, message = self.handleSessionChannel(newChannel)
+		ok, rejection, message, err = self.handleSessionChannel(newChannel)
 	case "direct-tcpip":
-		ok, rejection, message = self.handleTunnelChannel(newChannel)
+		ok, rejection, message, err = self.handleTunnelChannel(newChannel)
 	}
-
+	if err != nil {
+		return err
+	}
 	if ok {
-		return
+		return nil
 	}
 	log.Debugf("channel rejected due to %d: %s", rejection, message)
 
@@ -332,7 +342,7 @@ func (self *connection) handleChannel(newChannel ssh.NewChannel) {
 	channel, requests, err := newChannel.Accept()
 	if err != nil {
 		log.Warningf("failed to reject channel: %s", err)
-		return
+		return err
 	}
 
 	self.waitGroup.Add(1)
@@ -343,48 +353,49 @@ func (self *connection) handleChannel(newChannel ssh.NewChannel) {
 
 	if err := channel.Close(); err != nil {
 		log.Warningf("failed to close rejected channel: %s", err)
-		return
+		return err
 	}
+	return nil
 }
 
-func (self *connection) handleSessionChannel(newChannel ssh.NewChannel) (bool, ssh.RejectionReason, string) {
+func (self *connection) handleSessionChannel(newChannel ssh.NewChannel) (bool, ssh.RejectionReason, string, error) {
 	if len(newChannel.ExtraData()) > 0 {
 		// do not accept extra data in connection channel request
-		return false, ssh.Prohibited, "extra data not allowed"
+		return false, ssh.Prohibited, "extra data not allowed", ErrExtraDataNotAllowed
 	}
 
 	// accept the channel
 	channel, requests, err := newChannel.Accept()
 	if err != nil {
-		log.Warningf("failed to accept channel: %s", err)
-		return true, 0, ""
+		log.Errorf("failed to accept channel: %s", err)
+		return true, 0, "", err
 	}
 
+	// cannot return false from this point on
 	self.waitGroup.Add(1)
 	go func() {
 		defer self.waitGroup.Done()
 		handleSession(self, channel, requests, newChannel.ChannelType(), newChannel.ExtraData())
 	}()
-	return true, 0, ""
+	return true, 0, "", nil
 }
 
-func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ssh.RejectionReason, string) {
-
+func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ssh.RejectionReason, string, error) {
 	data, err := unmarshalTunnelData(newChannel.ExtraData())
 	if err != nil {
-		return false, ssh.UnknownChannelType, "failed to decode extra data"
+		return false, ssh.UnknownChannelType, "failed to decode extra data", err
 	}
 
 	// look up connection by name
 	otherConnection, host, port := self.gateway.lookupConnectionService(data.Host, uint16(data.Port))
 	if otherConnection == nil {
-		return false, ssh.ConnectionFailed, "service not found or not online"
+		return false, ssh.ConnectionFailed, "service not found or not online", nil
 	}
 
 	// see if this connection is allowed
 	if !self.permitPortForwarding {
 		log.Warningf("no permission to port forward: user = %s", self.user)
-		return false, ssh.Prohibited, "permission denied"
+		return false, ssh.Prohibited, "permission denied", nil
 	}
 
 	// found the service, attempt to open a channel
@@ -407,7 +418,7 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 		},
 	})
 	if err != nil {
-		return false, ssh.ConnectionFailed, "failed to connect"
+		return false, ssh.ConnectionFailed, "failed to connect", nil
 	}
 	defer func() {
 		if otherTunnel != nil {
@@ -419,7 +430,7 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 	channel, requests, err := newChannel.Accept()
 	if err != nil {
 		log.Warningf("failed to accept channel: %s", err)
-		return true, 0, ""
+		return true, 0, "", nil
 	}
 
 	// cannot return false from this point on
@@ -459,7 +470,7 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 	// do not close channel on exit
 	channel = nil
 	otherTunnel = nil
-	return true, 0, ""
+	return true, 0, "", nil
 }
 
 // open a channel from the server to the client side

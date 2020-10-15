@@ -51,7 +51,8 @@ func (self *tunnel) handleRequests(requests <-chan *ssh.Request) {
 		// reply to client
 		if request.WantReply {
 			if err := request.Reply(false, nil); err != nil {
-				log.Warningf("failed to reply to request: %s", err)
+				log.Errorf("failed to reply to request: %s", err)
+				break
 			}
 		}
 	}
@@ -73,6 +74,7 @@ func (self *tunnel) handleTunnel(otherTunnel *tunnel) {
 		io.Copy(otherTunnel.channel, self.channel)
 	}()
 
+	// wait until one of them is done
 	select {
 	case <-done1:
 	case <-done2:
