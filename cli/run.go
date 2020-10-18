@@ -92,7 +92,9 @@ func run(c *cli.Context) error {
 	sshConfig.AddHostKey(hostSigner)
 
 	// create gateway
-	gateway, err := gateway.Open(database, sshConfig)
+	gateway, err := gateway.Open(database, sshConfig, &gateway.Settings{
+		Version: c.App.Version,
+	})
 	if err != nil {
 		log.Errorf("failed to create ssh gateway: %s", err)
 		return err

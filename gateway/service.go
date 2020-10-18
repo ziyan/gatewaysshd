@@ -92,7 +92,7 @@ func (self *service) write(data []byte) error {
 }
 
 func (self *service) handleShell() error {
-	self.write([]byte("Welcome to gatewaysshd! Type \"help\" to get a list of available commands.\n"))
+	self.write([]byte(fmt.Sprintf("Welcome to gatewaysshd version %s! Type \"help\" to get a list of available commands.\n", self.connection.gateway.settings.Version)))
 	for {
 		self.terminal.SetPrompt("gatewaysshd> ")
 		line, err := self.terminal.ReadLine()
@@ -125,11 +125,23 @@ func (self *service) handleCommand(command []string) error {
 		return self.help()
 	case len(command) == 1 && command[0] == "ping":
 		return self.ping()
-	case len(command) == 1 && command[0] == "status":
-		return self.status()
+	case len(command) == 1 && command[0] == "version":
+		return self.version()
 	case len(command) == 1 && command[0] == "reportStatus":
 		return self.reportStatus()
 	}
+
+	if !self.connection.permitPortForwarding {
+		return ErrInvalidCommand
+	}
+
+	switch {
+	case len(command) == 1 && command[0] == "status":
+		return self.status("")
+	case len(command) == 2 && command[0] == "status":
+		return self.status(command[1])
+	}
+
 	if !self.connection.administrator {
 		return ErrInvalidCommand
 	}
@@ -147,8 +159,14 @@ func (self *service) help() error {
 		fmt.Sprintf("Available commands:"),
 		"",
 		fmt.Sprintf("    ping - ping server"),
-		fmt.Sprintf("    status - show gateway status"),
 		"",
+	}
+
+	if self.connection.permitPortForwarding {
+		content = append(content, []string{
+			fmt.Sprintf("    status [username] - show gateway status, optionally filter by username"),
+			"",
+		}...)
 	}
 
 	if self.connection.administrator {
@@ -173,12 +191,16 @@ func (self *service) ping() error {
 	return self.write([]byte("pong\n"))
 }
 
-func (self *service) status() error {
+func (self *service) version() error {
+	return self.write([]byte(fmt.Sprintf("%s\n", self.connection.gateway.settings.Version)))
+}
+
+func (self *service) status(user string) error {
 	var status interface{}
 	if !self.connection.permitPortForwarding {
 		status = self.connection.gatherStatus()
 	} else {
-		status = self.connection.gateway.gatherStatus()
+		status = self.connection.gateway.gatherStatus(user)
 	}
 	return self.marshal(status)
 }

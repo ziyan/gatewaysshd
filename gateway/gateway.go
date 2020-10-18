@@ -14,6 +14,10 @@ import (
 
 var log = logging.MustGetLogger("gateway")
 
+type Settings struct {
+	Version string
+}
+
 // an instance of gateway, contains runtime states
 type Gateway interface {
 	Close()
@@ -28,6 +32,7 @@ type Gateway interface {
 type gateway struct {
 	database         db.Database
 	sshConfig        *ssh.ServerConfig
+	settings         *Settings
 	connectionsIndex map[string][]*connection
 	connectionsList  []*connection
 	lock             sync.Mutex
@@ -35,10 +40,11 @@ type gateway struct {
 }
 
 // creates a new instance of gateway
-func Open(database db.Database, sshConfig *ssh.ServerConfig) (Gateway, error) {
+func Open(database db.Database, sshConfig *ssh.ServerConfig, settings *Settings) (Gateway, error) {
 	return &gateway{
 		database:         database,
 		sshConfig:        sshConfig,
+		settings:         settings,
 		connectionsIndex: make(map[string][]*connection),
 		connectionsList:  make([]*connection, 0),
 	}, nil
@@ -170,13 +176,15 @@ func (self *gateway) ScavengeConnections(timeout time.Duration) {
 	}
 }
 
-func (self *gateway) gatherStatus() map[string]interface{} {
+func (self *gateway) gatherStatus(user string) map[string]interface{} {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
 	connections := make([]interface{}, 0, len(self.connectionsList))
 	for _, connection := range self.connectionsList {
-		connections = append(connections, connection.gatherStatus())
+		if user == "" || connection.user == user {
+			connections = append(connections, connection.gatherStatus())
+		}
 	}
 
 	return map[string]interface{}{
