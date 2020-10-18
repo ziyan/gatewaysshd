@@ -158,8 +158,6 @@ func (self *service) help() error {
 	content := []string{
 		fmt.Sprintf("Available commands:"),
 		"",
-		fmt.Sprintf("    ping - ping server"),
-		"",
 	}
 
 	if self.connection.permitPortForwarding {
@@ -181,6 +179,8 @@ func (self *service) help() error {
 		fmt.Sprintf("    exit - exit shell"),
 		fmt.Sprintf("    quit - same as exit"),
 		fmt.Sprintf("    help - display this help message"),
+		fmt.Sprintf("    version - show server version"),
+		fmt.Sprintf("    ping - ping server"),
 		"",
 		"",
 	}...)
