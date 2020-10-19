@@ -38,7 +38,7 @@ func runService(command string, connection *connection, channel ssh.Channel) err
 			// legacy behavior, command itself is json
 			var status json.RawMessage
 			if err := json.Unmarshal([]byte(command), &status); err != nil {
-				log.Errorf("failed to unmarshal json: %s", err)
+				log.Errorf("%s: failed to unmarshal json: %s", self.connection, err)
 				return err
 			}
 			return self.connection.reportStatus(status)
@@ -212,7 +212,7 @@ func (self *service) reportStatus() error {
 
 	reader, err := gzip.NewReader(self.channel)
 	if err != nil {
-		log.Errorf("failed to decompress: %s", err)
+		log.Errorf("%s: failed to decompress: %s", self, err)
 		return err
 	}
 	defer reader.Close()
@@ -220,14 +220,14 @@ func (self *service) reportStatus() error {
 	// read all data from session
 	raw, err := ioutil.ReadAll(reader)
 	if err != nil {
-		log.Errorf("failed to read all: %s", err)
+		log.Errorf("%s: failed to read all: %s", self, err)
 		return err
 	}
 
 	// parse it in to json
 	var status json.RawMessage
 	if err := json.Unmarshal(raw, &status); err != nil {
-		log.Errorf("failed to unmarshal json: %s", err)
+		log.Errorf("%s: failed to unmarshal json: %s", self, err)
 		return err
 	}
 

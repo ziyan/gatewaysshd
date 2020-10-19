@@ -8,11 +8,11 @@ import (
 
 // handle session within a ssh connection
 func handleSession(connection *connection, channel ssh.Channel, requests <-chan *ssh.Request, channelType string, extraData []byte) {
-	log.Debugf("new session: user = %s, remote = %v, type = %s", connection.user, connection.remoteAddr, channelType)
+	log.Debugf("%s: new session: type = %s", connection, channelType)
 
 	// hanlde requests
 	for request := range requests {
-		log.Debugf("request received: type = %s, want_reply = %v, payload = %v", request.Type, request.WantReply, request.Payload)
+		// log.Debugf("%s: request received: type = %s, want_reply = %v, payload = %d", connection, request.Type, request.WantReply, len(request.Payload))
 
 		// check parameters
 		ok := true
@@ -32,7 +32,7 @@ func handleSession(connection *connection, channel ssh.Channel, requests <-chan 
 		// reply to client
 		if request.WantReply {
 			if err := request.Reply(ok, nil); err != nil {
-				log.Errorf("failed to reply to request: %s", err)
+				log.Errorf("%s: failed to reply to request: %s", connection, err)
 				break
 			}
 		}
@@ -48,7 +48,7 @@ func handleSession(connection *connection, channel ssh.Channel, requests <-chan 
 			success := false
 			defer func() {
 				if err := channel.CloseWrite(); err != nil {
-					log.Warningf("failed to close session: %s", err)
+					log.Warningf("%s: failed to close session: %s", connection, err)
 				}
 
 				exitStatus := struct{ Status uint32 }{}
@@ -56,11 +56,11 @@ func handleSession(connection *connection, channel ssh.Channel, requests <-chan 
 					exitStatus.Status = 1
 				}
 				if _, err := channel.SendRequest("exit-status", false, ssh.Marshal(exitStatus)); err != nil {
-					log.Warningf("failed to send exit-status for session: %s", err)
+					log.Warningf("%s: failed to send exit-status for session: %s", connection, err)
 				}
 
 				if err := channel.Close(); err != nil {
-					log.Warningf("failed to close session: %s", err)
+					log.Warningf("%s: failed to close session: %s", connection, err)
 				}
 			}()
 
@@ -69,7 +69,7 @@ func handleSession(connection *connection, channel ssh.Channel, requests <-chan 
 			if request.Type == "exec" {
 				var execute struct{ Command string }
 				if err := ssh.Unmarshal(request.Payload, &execute); err != nil {
-					log.Errorf("failed to unmarshal request payload: %s: %v", err, request.Payload)
+					log.Errorf("%s: failed to unmarshal request payload: %s: %v", connection, err, request.Payload)
 					return err
 				}
 				command = execute.Command
@@ -77,9 +77,9 @@ func handleSession(connection *connection, channel ssh.Channel, requests <-chan 
 
 			// do actual work here
 			if err := runService(command, connection, channel); err != nil {
-				log.Errorf("command %s failed: %s", command, err)
+				log.Errorf("%s: command %s failed: %s", connection, command, err)
 				if _, err2 := fmt.Fprintf(channel.Stderr(), "ERROR: %s\r\n", err); err2 != nil {
-					log.Errorf("failed to write to stdout: %s", err2)
+					log.Errorf("%s: failed to write to stdout: %s", connection, err2)
 				}
 				return err
 			}

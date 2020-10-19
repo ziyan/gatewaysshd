@@ -3,6 +3,7 @@ package gateway
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"time"
@@ -41,8 +42,6 @@ type connection struct {
 }
 
 func newConnection(gateway *gateway, conn *ssh.ServerConn, usage *usageStats) *connection {
-	log.Infof("new connection: user = %s, remote = %v", conn.User(), conn.RemoteAddr())
-
 	permitPortForwarding := false
 	if _, ok := conn.Permissions.Extensions["permit-port-forwarding"]; ok {
 		permitPortForwarding = true
@@ -53,7 +52,7 @@ func newConnection(gateway *gateway, conn *ssh.ServerConn, usage *usageStats) *c
 		administrator = true
 	}
 
-	return &connection{
+	self := &connection{
 		id:                   ksuid.New().String(),
 		gateway:              gateway,
 		conn:                 conn,
@@ -65,6 +64,12 @@ func newConnection(gateway *gateway, conn *ssh.ServerConn, usage *usageStats) *c
 		permitPortForwarding: permitPortForwarding,
 		administrator:        administrator,
 	}
+	log.Infof("%s: new connection", self)
+	return self
+}
+
+func (self *connection) String() string {
+	return fmt.Sprintf("connection(id=%q, remote=%q, user=%q)", self.id, self.remoteAddr, self.user)
 }
 
 // close the ssh connection
@@ -74,10 +79,10 @@ func (self *connection) close() {
 		self.gateway.deleteConnection(self)
 
 		if err := self.conn.Close(); err != nil {
-			log.Debugf("failed to close connection: %s", err)
+			log.Warningf("%s: failed to close connection: %s", self, err)
 		}
 
-		log.Infof("connection closed: user = %s, remote = %v", self.user, self.remoteAddr)
+		log.Infof("%s: connection closed", self)
 	})
 }
 
@@ -143,7 +148,7 @@ func (self *connection) reportStatus(status json.RawMessage) error {
 		model.Status = db.Status(status)
 		return nil
 	}); err != nil {
-		log.Errorf("failed to save user in database: %s", err)
+		log.Errorf("%s: failed to save user in database: %s", self, err)
 		return err
 	}
 	return nil
@@ -232,7 +237,7 @@ func (self *connection) registerService(host string, port uint16) error {
 	}
 	self.services[host][port] = true
 
-	log.Debugf("registered service: user = %s, host = %s, port = %d", self.user, host, port)
+	log.Debugf("%s: registered service: host = %s, port = %d", self, host, port)
 	return nil
 }
 
@@ -244,7 +249,7 @@ func (self *connection) deregisterService(host string, port uint16) error {
 		delete(self.services[host], port)
 	}
 
-	log.Debugf("deregistered service: user = %s, host = %s, port = %d", self.user, host, port)
+	log.Debugf("%s: deregistered service: host = %s, port = %d", self, host, port)
 	return nil
 }
 
@@ -253,7 +258,7 @@ func (self *connection) handleRequests(requests <-chan *ssh.Request) {
 
 	for request := range requests {
 		if err := self.handleRequest(request); err != nil {
-			log.Warningf("failed to handle request on connection %s user %s: %s", self.id, self.user, err)
+			log.Warningf("%s: failed to handle request: %s", self, err)
 			break
 		}
 	}
@@ -264,31 +269,31 @@ func (self *connection) handleChannels(channels <-chan ssh.NewChannel) {
 
 	for channel := range channels {
 		if err := self.handleChannel(channel); err != nil {
-			log.Warningf("failed to handle channel on connection %s user %s: %s", self.id, self.user, err)
+			log.Warningf("%s: failed to handle channel: %s", self, err)
 			break
 		}
 	}
 }
 
 func (self *connection) handleRequest(request *ssh.Request) error {
-	log.Debugf("request received: type = %s, want_reply = %v, payload = %v", request.Type, request.WantReply, request.Payload)
+	// log.Debugf("request received: type = %s, want_reply = %v, payload = %d", request.Type, request.WantReply, len(request.Payload))
 
 	ok := false
 	switch request.Type {
 	case "tcpip-forward":
 		request, err := unmarshalForwardRequest(request.Payload)
 		if err != nil {
-			log.Errorf("failed to decode request: %s", err)
+			log.Errorf("%s: failed to decode request: %s", self, err)
 			return err
 		}
 
 		if request.Port == 0 {
-			log.Errorf("requested forwarding port is not allowed: %d", request.Port)
+			log.Errorf("%s: requested forwarding port is not allowed: %d", self, request.Port)
 			return err
 		}
 
 		if err := self.registerService(request.Host, uint16(request.Port)); err != nil {
-			log.Errorf("failed to register service in connection: %s", err)
+			log.Errorf("%s: failed to register service in connection: %s", self, err)
 			return err
 		}
 
@@ -296,12 +301,12 @@ func (self *connection) handleRequest(request *ssh.Request) error {
 	case "cancel-tcpip-forward":
 		request, err := unmarshalForwardRequest(request.Payload)
 		if err != nil {
-			log.Errorf("failed to decode request: %s", err)
+			log.Errorf("%s: failed to decode request: %s", self, err)
 			return err
 		}
 
 		if err := self.deregisterService(request.Host, uint16(request.Port)); err != nil {
-			log.Errorf("failed to register service in connection: %s", err)
+			log.Errorf("%s: failed to register service in connection: %s", self, err)
 			return err
 		}
 
@@ -309,7 +314,7 @@ func (self *connection) handleRequest(request *ssh.Request) error {
 	}
 	if request.WantReply {
 		if err := request.Reply(ok, nil); err != nil {
-			log.Errorf("failed to reply to request: %s", err)
+			log.Errorf("%s: failed to reply to request: %s", self, err)
 			return err
 		}
 	}
@@ -317,7 +322,7 @@ func (self *connection) handleRequest(request *ssh.Request) error {
 }
 
 func (self *connection) handleChannel(newChannel ssh.NewChannel) error {
-	log.Debugf("new channel: type = %s, data = %v", newChannel.ChannelType(), newChannel.ExtraData())
+	log.Debugf("%s: new channel: type = %s, data = %v", self, newChannel.ChannelType(), newChannel.ExtraData())
 
 	ok := false
 	rejection := ssh.UnknownChannelType
@@ -336,13 +341,13 @@ func (self *connection) handleChannel(newChannel ssh.NewChannel) error {
 	if ok {
 		return nil
 	}
-	log.Debugf("channel rejected due to %d: %s", rejection, message)
+	log.Debugf("%s: channel rejected due to %d: %s", self, rejection, message)
 
 	// reject the channel, by accepting it then immediately close
 	// this is because Reject() leaks
 	channel, requests, err := newChannel.Accept()
 	if err != nil {
-		log.Errorf("failed to reject channel: %s", err)
+		log.Errorf("%s: failed to reject channel: %s", self, err)
 		return err
 	}
 
@@ -353,7 +358,7 @@ func (self *connection) handleChannel(newChannel ssh.NewChannel) error {
 	}()
 
 	if err := channel.Close(); err != nil {
-		log.Errorf("failed to close rejected channel: %s", err)
+		log.Errorf("%s: failed to close rejected channel: %s", self, err)
 		return err
 	}
 	return nil
@@ -368,7 +373,7 @@ func (self *connection) handleSessionChannel(newChannel ssh.NewChannel) (bool, s
 	// accept the channel
 	channel, requests, err := newChannel.Accept()
 	if err != nil {
-		log.Errorf("failed to accept channel: %s", err)
+		log.Errorf("%s: failed to accept channel: %s", self, err)
 		return true, 0, "", err
 	}
 
@@ -389,7 +394,7 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 
 	// see if this connection is allowed
 	if !self.permitPortForwarding {
-		log.Errorf("no permission to port forward: user = %s", self.user)
+		log.Errorf("%s: no permission to port forward", self)
 		return false, ssh.Prohibited, "permission denied", ErrPermissionDenied
 	}
 
@@ -430,7 +435,7 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 	// accept the channel
 	channel, requests, err := newChannel.Accept()
 	if err != nil {
-		log.Warningf("failed to accept channel: %s", err)
+		log.Warningf("%s: failed to accept channel: %s", self, err)
 		return true, 0, "", nil
 	}
 
@@ -439,7 +444,7 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 	defer func() {
 		if channel != nil {
 			if err := channel.Close(); err != nil {
-				log.Warningf("failed to close accepted channel: %s", err)
+				log.Warningf("%s: failed to close accepted channel: %s", self, err)
 			}
 		}
 	}()
@@ -476,7 +481,7 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 
 // open a channel from the server to the client side
 func (self *connection) openTunnel(channelType string, extraData []byte, metadata map[string]interface{}) (*tunnel, error) {
-	log.Debugf("opening channel: type = %s, data = %v", channelType, extraData)
+	log.Debugf("%s: opening channel: type = %s, data = %v", self, channelType, extraData)
 
 	channel, requests, err := self.conn.OpenChannel(channelType, extraData)
 	if err != nil {
@@ -485,7 +490,7 @@ func (self *connection) openTunnel(channelType string, extraData []byte, metadat
 	defer func() {
 		if channel != nil {
 			if err := channel.Close(); err != nil {
-				log.Warningf("failed to close opened channel: %s", err)
+				log.Warningf("%s: failed to close opened channel: %s", self, err)
 			}
 		}
 	}()

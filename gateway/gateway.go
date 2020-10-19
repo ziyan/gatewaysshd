@@ -145,7 +145,7 @@ func (self *gateway) lookupConnectionService(host string, port uint16) (*connect
 
 		for _, connection := range self.connectionsIndex[user] {
 			if connection.lookupService(host, port) {
-				log.Debugf("lookup: found service: user = %s, host = %s, port = %d", user, host, port)
+				log.Debugf("lookup: found service: connection = %s, host = %s, port = %d", connection, host, port)
 				return connection, host, port
 			}
 		}
@@ -170,7 +170,7 @@ func (self *gateway) ScavengeConnections(timeout time.Duration) {
 	for _, connection := range self.listConnections() {
 		idle := time.Since(connection.getUsed())
 		if idle > timeout {
-			log.Infof("scavenge: connection for %s timed out after %s", connection.user, idle)
+			log.Infof("scavenge: connection %s timed out after %s", connection, idle)
 			connection.close()
 		}
 	}

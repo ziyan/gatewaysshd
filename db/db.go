@@ -68,9 +68,9 @@ func (self *database) Print(values ...interface{}) {
 		}
 		duration := values[0].(time.Duration)
 		sql := values[1].(string)
-		variables := values[2]
+		// variables := values[2] // variables can get really big
 		rowsAffected := values[3].(int64)
-		log.Debugf("took %s to execute sql %s, variables %q, affected %d rows, called from %s", duration, sql, variables, rowsAffected, filenameWithLine)
+		log.Debugf("took %s to execute sql %s, affected %d rows, called from %s", duration, sql, rowsAffected, filenameWithLine)
 	case "error":
 		if len(values) != 1 {
 			return
