@@ -150,6 +150,8 @@ func (self *service) handleCommand(command []string) error {
 		return self.listUsers()
 	case len(command) == 2 && command[0] == "getUser":
 		return self.getUser(command[1])
+	case len(command) == 2 && command[0] == "kickUser":
+		return self.kickUser(command[1])
 	}
 	return ErrInvalidCommand
 }
@@ -171,6 +173,7 @@ func (self *service) help() error {
 		content = append(content, []string{
 			fmt.Sprintf("    listUsers - list all users"),
 			fmt.Sprintf("    getUser <username> - get details about a user"),
+			fmt.Sprintf("    kickUser <username> - close connections from a user"),
 			"",
 		}...)
 	}
@@ -249,4 +252,11 @@ func (self *service) getUser(userId string) error {
 		return err
 	}
 	return self.marshal(output)
+}
+
+func (self *service) kickUser(userId string) error {
+	if err := self.connection.gateway.kickUser(userId); err != nil {
+		return err
+	}
+	return nil
 }

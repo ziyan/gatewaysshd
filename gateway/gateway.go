@@ -161,6 +161,16 @@ func (self *gateway) ScavengeConnections(timeout time.Duration) {
 	}
 }
 
+func (self *gateway) kickUser(user string) error {
+	for _, connection := range self.listConnections() {
+		if connection.user == user {
+			log.Infof("kick: closing connection %s", connection)
+			connection.close()
+		}
+	}
+	return nil
+}
+
 func (self *gateway) gatherStatus(user string) map[string]interface{} {
 	self.lock.Lock()
 	defer self.lock.Unlock()

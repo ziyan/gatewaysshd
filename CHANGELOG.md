@@ -1,5 +1,9 @@
 # 0.2.3 (2020-10-21)
 
+## Features
+
+- Allow admin to kick user connections
+
 ## Bug fixes
 
 - Fix usage of wait group
