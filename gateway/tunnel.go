@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"io"
-	"sync"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -14,45 +13,53 @@ type tunnel struct {
 	channelType string
 	extraData   []byte
 	active      bool
-	closeOnce   sync.Once
+	done        chan struct{}
 	metadata    map[string]interface{}
 }
 
 func newTunnel(connection *connection, channel ssh.Channel, channelType string, extraData []byte, metadata map[string]interface{}) *tunnel {
 	log.Infof("%s: new tunnel: type = %s, metadata = %v", connection, channelType, metadata)
-	return &tunnel{
+	self := &tunnel{
 		connection:  connection,
 		channel:     channel,
 		channelType: channelType,
 		extraData:   extraData,
+		done:        make(chan struct{}),
 		metadata:    metadata,
 	}
+	connection.addTunnel(self)
+	return self
 }
 
 // close the tunnel
 func (self *tunnel) close() {
-	self.closeOnce.Do(func() {
-		if err := self.channel.Close(); err != nil {
-			log.Warningf("%s: failed to close tunnel: %s", self.connection, err)
-		}
-
-		log.Infof("%s: tunnel closed: type = %s, metadata = %v", self.connection, self.channelType, self.metadata)
-
-		self.connection.deleteTunnel(self)
-	})
+	close(self.done)
 }
 
 func (self *tunnel) handleRequests(requests <-chan *ssh.Request) {
-	defer self.close()
+	defer func() {
+		self.connection.deleteTunnel(self)
+		if err := self.channel.Close(); err != nil {
+			log.Warningf("%s: failed to close tunnel: %s", self.connection, err)
+		}
+		log.Infof("%s: tunnel closed: type = %s, metadata = %v", self.connection, self.channelType, self.metadata)
+	}()
 
-	for request := range requests {
-		// log.Debugf("%s: request received: type = %s, want_reply = %v, payload = %d", self.connection, request.Type, request.WantReply, len(request.Payload))
-
-		// reply to client
-		if request.WantReply {
-			if err := request.Reply(false, nil); err != nil {
-				log.Errorf("%s: failed to reply to request: %s", self.connection, err)
-				break
+	for {
+		select {
+		case <-self.done:
+			return
+		case request, ok := <-requests:
+			if !ok {
+				return
+			}
+			// log.Debugf("%s: request received: type = %s, want_reply = %v, payload = %d", self.connection, request.Type, request.WantReply, len(request.Payload))
+			// reply to client
+			if request.WantReply {
+				if err := request.Reply(false, nil); err != nil {
+					log.Errorf("%s: failed to reply to request: %s", self.connection, err)
+					return
+				}
 			}
 		}
 	}

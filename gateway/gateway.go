@@ -36,7 +36,6 @@ type gateway struct {
 	connectionsIndex map[string][]*connection
 	connectionsList  []*connection
 	lock             sync.Mutex
-	waitGroup        sync.WaitGroup
 }
 
 // creates a new instance of gateway
@@ -52,8 +51,6 @@ func Open(database db.Database, sshConfig *ssh.ServerConfig, settings *Settings)
 
 // close the gateway instance
 func (self *gateway) Close() {
-	defer self.waitGroup.Wait()
-
 	for _, connection := range self.listConnections() {
 		connection.close()
 	}
@@ -85,19 +82,7 @@ func (self *gateway) HandleConnection(c net.Conn) {
 	}()
 
 	// create a connection and handle it
-	connection := newConnection(self, conn, usage)
-	self.addConnection(connection)
-
-	// handle requests and channels on this connection
-	self.waitGroup.Add(2)
-	go func() {
-		defer self.waitGroup.Done()
-		connection.handleRequests(requests)
-	}()
-	go func() {
-		defer self.waitGroup.Done()
-		connection.handleChannels(channels)
-	}()
+	handleConnection(self, conn, channels, requests, usage)
 
 	// don't close connection on success
 	conn = nil

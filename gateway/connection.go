@@ -33,15 +33,15 @@ type connection struct {
 	tunnels              []*tunnel
 	tunnelsClosed        uint64
 	services             map[string]map[uint16]bool
+	done                 chan struct{}
 	lock                 sync.Mutex
-	closeOnce            sync.Once
 	waitGroup            sync.WaitGroup
 	usage                *usageStats
 	permitPortForwarding bool
 	administrator        bool
 }
 
-func newConnection(gateway *gateway, conn *ssh.ServerConn, usage *usageStats) *connection {
+func handleConnection(gateway *gateway, conn *ssh.ServerConn, channels <-chan ssh.NewChannel, requests <-chan *ssh.Request, usage *usageStats) {
 	permitPortForwarding := false
 	if _, ok := conn.Permissions.Extensions["permit-port-forwarding"]; ok {
 		permitPortForwarding = true
@@ -63,9 +63,46 @@ func newConnection(gateway *gateway, conn *ssh.ServerConn, usage *usageStats) *c
 		usage:                usage,
 		permitPortForwarding: permitPortForwarding,
 		administrator:        administrator,
+		done:                 make(chan struct{}),
 	}
 	log.Infof("%s: new connection", self)
-	return self
+	self.gateway.addConnection(self)
+
+	// handle requests and channels on this connection
+	self.waitGroup.Add(1)
+	go func() {
+		defer self.waitGroup.Done()
+		defer func() {
+			self.gateway.deleteConnection(self)
+			if err := self.conn.Close(); err != nil {
+				log.Warningf("%s: failed to close connection: %s", self, err)
+			}
+			log.Infof("%s: connection closed", self)
+		}()
+
+		for {
+			select {
+			case <-self.done:
+				return
+			case request, ok := <-requests:
+				if !ok {
+					return
+				}
+				if err := self.handleRequest(request); err != nil {
+					log.Warningf("%s: failed to handle request: %s", self, err)
+					return
+				}
+			case channel, ok := <-channels:
+				if !ok {
+					return
+				}
+				if err := self.handleChannel(channel); err != nil {
+					log.Warningf("%s: failed to handle channel: %s", self, err)
+					return
+				}
+			}
+		}
+	}()
 }
 
 func (self *connection) String() string {
@@ -75,15 +112,8 @@ func (self *connection) String() string {
 // close the ssh connection
 func (self *connection) close() {
 	defer self.waitGroup.Wait()
-	self.closeOnce.Do(func() {
-		self.gateway.deleteConnection(self)
-
-		if err := self.conn.Close(); err != nil {
-			log.Warningf("%s: failed to close connection: %s", self, err)
-		}
-
-		log.Infof("%s: connection closed", self)
-	})
+	close(self.done)
+	log.Debugf("%s: connection closed", self)
 }
 
 // tunnels within a ssh connection
@@ -253,28 +283,6 @@ func (self *connection) deregisterService(host string, port uint16) error {
 	return nil
 }
 
-func (self *connection) handleRequests(requests <-chan *ssh.Request) {
-	defer self.close()
-
-	for request := range requests {
-		if err := self.handleRequest(request); err != nil {
-			log.Warningf("%s: failed to handle request: %s", self, err)
-			break
-		}
-	}
-}
-
-func (self *connection) handleChannels(channels <-chan ssh.NewChannel) {
-	defer self.close()
-
-	for channel := range channels {
-		if err := self.handleChannel(channel); err != nil {
-			log.Warningf("%s: failed to handle channel: %s", self, err)
-			break
-		}
-	}
-}
-
 func (self *connection) handleRequest(request *ssh.Request) error {
 	// log.Debugf("request received: type = %s, want_reply = %v, payload = %d", request.Type, request.WantReply, len(request.Payload))
 
@@ -411,7 +419,6 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 		OriginAddress: data.OriginAddress,
 		OriginPort:    data.OriginPort,
 	}
-
 	otherTunnel, err := otherConnection.openTunnel("forwarded-tcpip", marshalTunnelData(data2), map[string]interface{}{
 		"origin": data.OriginAddress,
 		"from": map[string]interface{}{
@@ -424,6 +431,7 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 		},
 	})
 	if err != nil {
+		log.Warningf("%s: failed to open tunnel to %s: %s", self, otherConnection, err)
 		return false, ssh.ConnectionFailed, "failed to connect", nil
 	}
 	defer func() {
@@ -435,20 +443,11 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 	// accept the channel
 	channel, requests, err := newChannel.Accept()
 	if err != nil {
-		log.Warningf("%s: failed to accept channel: %s", self, err)
-		return true, 0, "", nil
+		log.Errorf("%s: failed to accept channel: %s", self, err)
+		return true, 0, "", err
 	}
 
 	// cannot return false from this point on
-	// also need to close the accepted channel
-	defer func() {
-		if channel != nil {
-			if err := channel.Close(); err != nil {
-				log.Warningf("%s: failed to close accepted channel: %s", self, err)
-			}
-		}
-	}()
-
 	thisTunnel := newTunnel(self, channel, newChannel.ChannelType(), newChannel.ExtraData(), map[string]interface{}{
 		"origin": data.OriginAddress,
 		"to": map[string]interface{}{
@@ -460,21 +459,19 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 			"port": data.Port,
 		},
 	})
-	self.addTunnel(thisTunnel)
-
-	// no failure
-	self.waitGroup.Add(2)
+	self.waitGroup.Add(1)
 	go func() {
 		defer self.waitGroup.Done()
 		thisTunnel.handleRequests(requests)
 	}()
+
+	self.waitGroup.Add(1)
 	go func(otherTunnel *tunnel) {
 		defer self.waitGroup.Done()
 		thisTunnel.handleTunnel(otherTunnel)
 	}(otherTunnel)
 
-	// do not close channel on exit
-	channel = nil
+	// do not close
 	otherTunnel = nil
 	return true, 0, "", nil
 }
@@ -487,25 +484,13 @@ func (self *connection) openTunnel(channelType string, extraData []byte, metadat
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if channel != nil {
-			if err := channel.Close(); err != nil {
-				log.Warningf("%s: failed to close opened channel: %s", self, err)
-			}
-		}
-	}()
-
-	tunnel := newTunnel(self, channel, channelType, extraData, metadata)
-	self.addTunnel(tunnel)
 
 	// no failure
+	tunnel := newTunnel(self, channel, channelType, extraData, metadata)
 	self.waitGroup.Add(1)
 	go func() {
 		defer self.waitGroup.Done()
 		tunnel.handleRequests(requests)
 	}()
-
-	// do not close channel on exit
-	channel = nil
 	return tunnel, nil
 }
