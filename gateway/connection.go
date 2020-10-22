@@ -31,6 +31,7 @@ type connection struct {
 	remoteAddr           net.Addr
 	localAddr            net.Addr
 	tunnels              []*tunnel
+	tunnelsOpened        uint64
 	tunnelsClosed        uint64
 	services             map[string]map[uint16]bool
 	done                 chan struct{}
@@ -131,6 +132,7 @@ func (self *connection) addTunnel(t *tunnel) {
 	defer self.lock.Unlock()
 
 	self.tunnels = append([]*tunnel{t}, self.tunnels...)
+	self.tunnelsOpened += 1
 }
 
 func (self *connection) deleteTunnel(t *tunnel) {
@@ -192,17 +194,19 @@ type connectionStatus struct {
 
 	User                 string `json:"user,omitempty"`
 	Administrator        bool   `json:"administrator,omitempty"`
-	PermitPortForwarding bool   `json:"permit_port_forwarding,omitempty"`
+	PermitPortForwarding bool   `json:"permitPortForwarding,omitempty"`
 	Address              string `json:"address,omitempty"`
 
 	Tunnels       []*tunnelStatus `json:"tunnels,omitempty"`
-	TunnelsClosed uint64          `json:"tunnels_closed,omitempty"`
+	TunnelsActive uint64          `json:"tunnelsActive,omitempty"`
+	TunnelsOpened uint64          `json:"tunnelsOpened,omitempty"`
+	TunnelsClosed uint64          `json:"tunnelsClosed,omitempty"`
 
-	UpTime   uint64 `json:"up_time"`
-	IdleTime uint64 `json:"idle_time"`
+	UpTime   uint64 `json:"upTime"`
+	IdleTime uint64 `json:"idleTime"`
 
-	BytesRead    uint64 `json:"bytes_read"`
-	BytesWritten uint64 `json:"bytes_written"`
+	BytesRead    uint64 `json:"bytesRead"`
+	BytesWritten uint64 `json:"bytesWritten"`
 
 	Services map[string][]uint16 `json:"services,omitempty"`
 }
@@ -233,6 +237,8 @@ func (self *connection) gatherStatus() *connectionStatus {
 		PermitPortForwarding: self.permitPortForwarding,
 		Address:              self.remoteAddr.String(),
 		Tunnels:              tunnels,
+		TunnelsActive:        uint64(len(tunnels)),
+		TunnelsOpened:        self.tunnelsOpened,
 		TunnelsClosed:        self.tunnelsClosed,
 		Created:              self.usage.created,
 		Used:                 self.usage.used,
@@ -412,34 +418,6 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 		return false, ssh.ConnectionFailed, "service not found or not online", nil
 	}
 
-	// found the service, attempt to open a channel
-	data2 := &tunnelData{
-		Host:          host,
-		Port:          uint32(port),
-		OriginAddress: data.OriginAddress,
-		OriginPort:    data.OriginPort,
-	}
-	otherTunnel, err := otherConnection.openTunnel("forwarded-tcpip", marshalTunnelData(data2), map[string]interface{}{
-		"origin": data.OriginAddress,
-		"from": map[string]interface{}{
-			"address": self.remoteAddr.String(),
-			"user":    self.user,
-		},
-		"service": map[string]interface{}{
-			"host": data.Host,
-			"port": data.Port,
-		},
-	})
-	if err != nil {
-		log.Warningf("%s: failed to open tunnel to %s: %s", self, otherConnection, err)
-		return false, ssh.ConnectionFailed, "failed to connect", nil
-	}
-	defer func() {
-		if otherTunnel != nil {
-			otherTunnel.close()
-		}
-	}()
-
 	// accept the channel
 	channel, requests, err := newChannel.Accept()
 	if err != nil {
@@ -447,32 +425,54 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 		return true, 0, "", err
 	}
 
-	// cannot return false from this point on
-	thisTunnel := newTunnel(self, channel, newChannel.ChannelType(), newChannel.ExtraData(), map[string]interface{}{
-		"origin": data.OriginAddress,
-		"to": map[string]interface{}{
-			"user":    otherConnection.user,
-			"address": otherConnection.remoteAddr.String(),
-		},
-		"service": map[string]interface{}{
-			"host": data.Host,
-			"port": data.Port,
-		},
-	})
 	self.waitGroup.Add(1)
 	go func() {
 		defer self.waitGroup.Done()
-		thisTunnel.handleRequests(requests)
-	}()
 
-	self.waitGroup.Add(1)
-	go func(otherTunnel *tunnel) {
-		defer self.waitGroup.Done()
+		// first need to track the opened channel
+		thisTunnel := newTunnel(self, channel, newChannel.ChannelType(), newChannel.ExtraData(), map[string]interface{}{
+			"origin": data.OriginAddress,
+			"to": map[string]interface{}{
+				"user":    otherConnection.user,
+				"address": otherConnection.remoteAddr.String(),
+			},
+			"service": map[string]interface{}{
+				"host": data.Host,
+				"port": data.Port,
+			},
+		})
+		self.waitGroup.Add(1)
+		go func() {
+			defer self.waitGroup.Done()
+			thisTunnel.handleRequests(requests)
+		}()
+		defer thisTunnel.close()
+
+		// attempt to open a channel, this can block
+		otherTunnel, err := otherConnection.openTunnel("forwarded-tcpip", marshalTunnelData(&tunnelData{
+			Host:          host,
+			Port:          uint32(port),
+			OriginAddress: data.OriginAddress,
+			OriginPort:    data.OriginPort,
+		}), map[string]interface{}{
+			"origin": data.OriginAddress,
+			"from": map[string]interface{}{
+				"address": self.remoteAddr.String(),
+				"user":    self.user,
+			},
+			"service": map[string]interface{}{
+				"host": data.Host,
+				"port": data.Port,
+			},
+		})
+		if err != nil {
+			log.Warningf("%s: failed to open tunnel to %s: %s", self, otherConnection, err)
+			return
+		}
+		defer otherTunnel.close()
+
 		thisTunnel.handleTunnel(otherTunnel)
-	}(otherTunnel)
-
-	// do not close
-	otherTunnel = nil
+	}()
 	return true, 0, "", nil
 }
 

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"io"
+	"sync"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -14,6 +15,7 @@ type tunnel struct {
 	extraData   []byte
 	active      bool
 	done        chan struct{}
+	closeOnce   sync.Once
 	metadata    map[string]interface{}
 }
 
@@ -33,7 +35,9 @@ func newTunnel(connection *connection, channel ssh.Channel, channelType string, 
 
 // close the tunnel
 func (self *tunnel) close() {
-	close(self.done)
+	self.closeOnce.Do(func() {
+		close(self.done)
+	})
 }
 
 func (self *tunnel) handleRequests(requests <-chan *ssh.Request) {

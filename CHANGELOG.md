@@ -1,3 +1,10 @@
+# 0.2.4 (2020-10-22)
+
+## Bug fixes
+
+- Fix an issue where `openTunnel` can block and stall connection
+
+
 # 0.2.3 (2020-10-21)
 
 ## Features

@@ -209,7 +209,7 @@ func (self *gateway) ListUsers() (interface{}, error) {
 	return map[string]interface{}{
 		"users": users,
 		"meta": map[string]interface{}{
-			"total_count": len(users),
+			"totalCount": len(users),
 		},
 	}, nil
 }
