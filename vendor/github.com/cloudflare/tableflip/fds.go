@@ -1,6 +1,7 @@
 package tableflip
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -74,24 +75,44 @@ func newFile(fd uintptr, name fileName) *file {
 // Fds holds all file descriptors inherited from the
 // parent process.
 type Fds struct {
-	mu sync.Mutex
-	// NB: Files in these maps may be in blocking mode.
+	mu        sync.Mutex
 	inherited map[fileName]*file
 	used      map[fileName]*file
+	lc        *net.ListenConfig
 }
 
-func newFds(inherited map[fileName]*file) *Fds {
+func newFds(inherited map[fileName]*file, lc *net.ListenConfig) *Fds {
 	if inherited == nil {
 		inherited = make(map[fileName]*file)
 	}
+
+	if lc == nil {
+		lc = &net.ListenConfig{}
+	}
+
 	return &Fds{
 		inherited: inherited,
 		used:      make(map[fileName]*file),
+		lc:        lc,
 	}
+}
+
+func (f *Fds) newListener(network, addr string) (net.Listener, error) {
+	return f.lc.Listen(context.Background(), network, addr)
 }
 
 // Listen returns a listener inherited from the parent process, or creates a new one.
 func (f *Fds) Listen(network, addr string) (net.Listener, error) {
+	return f.ListenWithCallback(network, addr, f.newListener)
+}
+
+// ListenWithCallback returns a listener inherited from the parent process,
+// or calls the supplied callback to create a new one.
+//
+// This should be used in case some customization has to be applied to create the
+// connection. Note that the callback must not use the underlying `Fds` object
+// as it will be locked during the call.
+func (f *Fds) ListenWithCallback(network, addr string, callback func(network, addr string) (net.Listener, error)) (net.Listener, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -104,7 +125,7 @@ func (f *Fds) Listen(network, addr string) (net.Listener, error) {
 		return ln, nil
 	}
 
-	ln, err = net.Listen(network, addr)
+	ln, err = callback(network, addr)
 	if err != nil {
 		return nil, fmt.Errorf("can't create new listener: %s", err)
 	}
@@ -173,8 +194,22 @@ func (f *Fds) addListenerLocked(network, addr string, ln Listener) error {
 	return f.addSyscallConnLocked(listenKind, network, addr, ln)
 }
 
+func (f *Fds) newPacketConn(network, addr string) (net.PacketConn, error) {
+	return f.lc.ListenPacket(context.Background(), network, addr)
+}
+
 // ListenPacket returns a packet conn inherited from the parent process, or creates a new one.
 func (f *Fds) ListenPacket(network, addr string) (net.PacketConn, error) {
+	return f.ListenPacketWithCallback(network, addr, f.newPacketConn)
+}
+
+// ListenPacketWithCallback returns a packet conn inherited from the parent process,
+// or calls the supplied callback to create a new one.
+//
+// This should be used in case some customization has to be applied to create the
+// connection. Note that the callback must not use the underlying `Fds` object
+// as it will be locked during the call.
+func (f *Fds) ListenPacketWithCallback(network, addr string, callback func(network, addr string) (net.PacketConn, error)) (net.PacketConn, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -187,7 +222,7 @@ func (f *Fds) ListenPacket(network, addr string) (net.PacketConn, error) {
 		return conn, nil
 	}
 
-	conn, err = net.ListenPacket(network, addr)
+	conn, err = callback(network, addr)
 	if err != nil {
 		return nil, fmt.Errorf("can't create new listener: %s", err)
 	}
@@ -314,13 +349,10 @@ func (f *Fds) File(name string) (*os.File, error) {
 }
 
 // AddFile adds a file.
-//
-// Until Go 1.12, file will be in blocking mode
-// after this call.
 func (f *Fds) AddFile(name string, file *os.File) error {
 	key := fileName{fdKind, name}
 
-	dup, err := dupFile(file, key)
+	dup, err := dupConn(file, key)
 	if err != nil {
 		return err
 	}
@@ -421,4 +453,23 @@ func dupConn(conn syscall.Conn, name fileName) (*file, error) {
 		return nil, fmt.Errorf("can't access fd: %s", err)
 	}
 	return dup, duperr
+}
+
+// sysConnFd retrieves the fd for a syscall.Conn.
+//
+// Don't close the conn while using the fd.
+func sysConnFd(conn syscall.Conn) (uintptr, error) {
+	raw, err := conn.SyscallConn()
+	if err != nil {
+		return 0, err
+	}
+
+	var fd uintptr
+	err = raw.Control(func(fdArg uintptr) {
+		fd = fdArg
+	})
+	if err != nil {
+		return 0, fmt.Errorf("can't access fd: %s", err)
+	}
+	return fd, nil
 }
