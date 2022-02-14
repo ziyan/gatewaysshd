@@ -10,7 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cloudflare/tableflip"
 	"github.com/urfave/cli"
 
 	"github.com/ziyan/gatewaysshd/auth"
@@ -37,19 +36,9 @@ func run(c *cli.Context) error {
 		return err
 	}
 
-	// set up upgrader
-	upgrader, err := tableflip.New(tableflip.Options{
-		PIDFile: c.String("pid-file"),
-	})
-	if err != nil {
-		log.Errorf("failed to create upgrader: %s", err)
-		return err
-	}
-	defer upgrader.Stop()
-
 	// ssh listener
 	log.Debugf("listening ssh endpoint: %s", c.String("listen-ssh"))
-	sshListener, err := upgrader.Fds.Listen("tcp", c.String("listen-ssh"))
+	sshListener, err := net.Listen("tcp", c.String("listen-ssh"))
 	if err != nil {
 		log.Errorf("failed to listen on %s: %s", c.String("listen-ssh"), err)
 		return err
@@ -59,7 +48,7 @@ func run(c *cli.Context) error {
 	var httpListener net.Listener
 	if c.String("listen-http") != "" {
 		log.Debugf("listening http endpoint: %s", c.String("listen-http"))
-		httpListener, err = upgrader.Fds.Listen("tcp", c.String("listen-http"))
+		httpListener, err = net.Listen("tcp", c.String("listen-http"))
 		if err != nil {
 			log.Errorf("failed to listen on %s: %s", c.String("listen-http"), err)
 			return err
@@ -101,25 +90,8 @@ func run(c *cli.Context) error {
 	}
 	defer gateway.Close()
 
-	// tell parent that we are ready
-	// need to get all the inheritted fds before calling this
-	if err := upgrader.Ready(); err != nil {
-		log.Errorf("failed to send ready to parent: %s", err)
-		return err
-	}
-
-	// wait until parent exit before continuing
-	if err := upgrader.WaitForParent(context.Background()); err != nil {
-		log.Errorf("failed to wait for parent to shutdown: %s", err)
-		return err
-	}
-
 	// run
 	var waitGroup sync.WaitGroup
-	defer waitGroup.Wait()
-
-	// signal to quit
-	quit := false
 
 	// accept all connections
 	sshRunning := make(chan struct{})
@@ -128,21 +100,16 @@ func run(c *cli.Context) error {
 		defer waitGroup.Done()
 		defer close(sshRunning)
 
-		var waitGroup2 sync.WaitGroup
-		defer waitGroup2.Wait()
-
 		log.Debugf("running and serving ssh")
 		for {
 			socket, err := sshListener.Accept()
 			if err != nil {
-				if !quit {
-					log.Errorf("failed to accept incoming tcp connection: %s", err)
-				}
+				log.Errorf("failed to accept incoming tcp connection: %s", err)
 				break
 			}
-			waitGroup2.Add(1)
+			waitGroup.Add(1)
 			go func() {
-				defer waitGroup2.Done()
+				defer waitGroup.Done()
 				gateway.HandleConnection(socket)
 			}()
 		}
@@ -173,19 +140,15 @@ func run(c *cli.Context) error {
 	}
 
 	// wait till exit
-	signaling := make(chan os.Signal, 1)
+	signaling := make(chan os.Signal, 2)
 	signal.Notify(signaling, syscall.SIGINT, syscall.SIGTERM)
-	upgrading := make(chan os.Signal, 1)
-	signal.Notify(upgrading, syscall.SIGHUP)
 
+	// signal to quit
+	quit := false
 	for !quit {
 		select {
-		case <-upgrading:
-			log.Noticef("upgrading ...")
-			if err := upgrader.Upgrade(); err != nil {
-				log.Errorf("failed to upgrade: %s", err)
-			}
-		case <-signaling:
+		case sig := <-signaling:
+			log.Warningf("received signal %v", sig)
 			quit = true
 		case <-sshRunning:
 			quit = true
@@ -193,8 +156,6 @@ func run(c *cli.Context) error {
 			quit = true
 		case <-time.After(10 * time.Second):
 			gateway.ScavengeConnections(idleTimeout)
-		case <-upgrader.Exit():
-			quit = true
 		}
 	}
 
@@ -225,5 +186,7 @@ func run(c *cli.Context) error {
 			}
 		}()
 	}
+
+	waitGroup.Wait()
 	return nil
 }
