@@ -49,7 +49,7 @@ func wrapHttpHandler(handler func(*http.Request) (interface{}, error)) func(http
 	}
 }
 
-func newHttpHandler(gateway gateway.Gateway, enablePprof bool) http.Handler {
+func newHttpHandler(gateway gateway.Gateway) http.Handler {
 	router := mux.NewRouter().StrictSlash(true)
 	router.Path("/api/user").HandlerFunc(wrapHttpHandler(func(request *http.Request) (interface{}, error) {
 		return gateway.ListUsers()

@@ -24,9 +24,7 @@ _testmain.go
 *.prof
 
 # Project specific
-/gatewaysshd
 /tmp
 /data
-/coverage.*
 /id_rsa*
-/docs
+/build

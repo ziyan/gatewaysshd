@@ -20,13 +20,18 @@ var flags = []cli.Flag{
 		Usage: "log format",
 	},
 	cli.StringFlag{
+		Name:  "listen-debug",
+		Value: "127.0.0.1:6080",
+		Usage: "debug listen endpoint",
+	},
+	cli.StringFlag{
 		Name:  "listen-ssh",
 		Value: ":2020",
 		Usage: "ssh listen endpoint",
 	},
 	cli.StringFlag{
 		Name:  "listen-http",
-		Value: "",
+		Value: "127.0.0.1:2080",
 		Usage: "http listen endpoint",
 	},
 	cli.StringFlag{
@@ -83,10 +88,6 @@ var flags = []cli.Flag{
 		Name:  "postgres-dbname",
 		Value: "gatewaysshd",
 		Usage: "postgres database name",
-	},
-	cli.BoolFlag{
-		Name:  "debug-pprof",
-		Usage: "enable pprof debugging",
 	},
 }
 

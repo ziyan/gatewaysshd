@@ -15,9 +15,19 @@ import (
 	"github.com/ziyan/gatewaysshd/auth"
 	"github.com/ziyan/gatewaysshd/db"
 	"github.com/ziyan/gatewaysshd/gateway"
+	"github.com/ziyan/gatewaysshd/util/debugutil"
 )
 
 func run(c *cli.Context) error {
+	// debugging endpoint, start as early as possible
+	if c.String("listen-debug") != "" {
+		stopDebugServer, err := debugutil.RunDebugServer(c.String("listen-debug"))
+		if err != nil {
+			return err
+		}
+		defer stopDebugServer()
+	}
+
 	caPublicKeys, err := parseCaPublicKeys(c)
 	if err != nil {
 		log.Errorf("failed to parse certificate authority public key from file \"%s\": %s", c.String("ca-public-key"), err)
@@ -123,7 +133,7 @@ func run(c *cli.Context) error {
 	if c.String("listen-http") != "" {
 		httpServer = &http.Server{
 			Addr:    c.String("listen-http"),
-			Handler: newHttpHandler(gateway, c.Bool("debug-pprof")),
+			Handler: newHttpHandler(gateway),
 		}
 		waitGroup.Add(1)
 		go func() {
