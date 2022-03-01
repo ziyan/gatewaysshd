@@ -72,10 +72,10 @@ func newHttpHandler(gateway gateway.Gateway) http.Handler {
 		if len(screenshot) == 0 {
 			return nil, ErrNotFound
 		}
-		return func(response http.ResponseWriter, request *http.Request) {
+		return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 			response.Header().Set("Content-Type", "image/png")
 			_, _ = response.Write(screenshot)
-		}, nil
+		}), nil
 	}))
 	return router
 }
