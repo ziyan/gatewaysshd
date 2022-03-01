@@ -13,7 +13,6 @@ type tunnel struct {
 	channel     ssh.Channel
 	channelType string
 	extraData   []byte
-	active      bool
 	done        chan struct{}
 	closeOnce   sync.Once
 	metadata    map[string]interface{}
@@ -76,13 +75,13 @@ func (self *tunnel) handleTunnel(otherTunnel *tunnel) {
 	done1 := make(chan struct{})
 	go func() {
 		defer close(done1)
-		io.Copy(self.channel, otherTunnel.channel)
+		_, _ = io.Copy(self.channel, otherTunnel.channel)
 	}()
 
 	done2 := make(chan struct{})
 	go func() {
 		defer close(done2)
-		io.Copy(otherTunnel.channel, self.channel)
+		_, _ = io.Copy(otherTunnel.channel, self.channel)
 	}()
 
 	// wait until one of them is done

@@ -29,3 +29,4 @@ _testmain.go
 /data
 /coverage.*
 /id_rsa*
+/docs

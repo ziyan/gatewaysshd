@@ -3,7 +3,7 @@ package db
 import (
 	"time"
 
-	"github.com/jinzhu/gorm"
+	"gorm.io/gorm"
 
 	"github.com/ziyan/gatewaysshd/db/migrations"
 )
@@ -20,7 +20,7 @@ func (self *Migration) TableName() string {
 }
 
 func (self *database) Migrate() error {
-	if err := self.db.AutoMigrate(&Migration{}).Error; err != nil {
+	if err := self.db.AutoMigrate(&Migration{}); err != nil {
 		log.Errorf("failed to migrate database: %s", err)
 		return err
 	}

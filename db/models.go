@@ -62,8 +62,8 @@ type User struct {
 	ID string `json:"id,omitempty" gorm:"primary_key:true"`
 
 	// meta data
-	Created  time.Time `json:"created,omitempty"`
-	Modified time.Time `json:"modified,omitempty"`
+	CreatedAt  time.Time `json:"createdAt,omitempty"`
+	ModifiedAt time.Time `json:"modifiedAt,omitempty"`
 
 	// comments about this user
 	Comment string `json:"comment,omitempty"`
@@ -80,10 +80,13 @@ type User struct {
 	// whether the user is an administrator
 	Administrator bool `json:"administrator,omitempty"`
 
+	// screenshot
+	Screenshot []byte `json:"-" gorm:"type:bytea"`
+
 	// whether the user account has been disabled
 	Disabled bool `json:"disabled,omitempty"`
 
-	// whther the user is online, not saved in database
+	// whether the user is online, not saved in database
 	Online bool `json:"online,omitempty" gorm:"-"`
 
 	// current connections, not saved in database

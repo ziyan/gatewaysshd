@@ -1,3 +1,19 @@
+# 0.2.6 (2022-03-01)
+
+## Features
+
+- Upgrade `gorm`
+- Code clean up and lint
+- Support saving screenshot
+
+
+# 0.2.5 (2022-02-14)
+
+## Features
+
+- Remove `tableflip`
+
+
 # 0.2.4 (2020-10-22)
 
 ## Bug fixes

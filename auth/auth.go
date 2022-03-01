@@ -46,7 +46,7 @@ func (self *authenticator) authenticate(meta ssh.ConnMetadata, publicKey ssh.Pub
 	certificateChecker := &ssh.CertChecker{
 		IsUserAuthority: func(publicKey ssh.PublicKey) bool {
 			for _, caPublicKey := range self.caPublicKeys {
-				if bytes.Compare(caPublicKey.Marshal(), publicKey.Marshal()) == 0 {
+				if bytes.Equal(caPublicKey.Marshal(), publicKey.Marshal()) {
 					return true
 				}
 			}

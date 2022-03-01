@@ -4,19 +4,28 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jinzhu/gorm"
+	"gorm.io/gorm"
 )
 
 func (self *database) ListUsers() ([]*User, error) {
 	var results []*User
 	if err := self.db.Transaction(func(tx *gorm.DB) error {
 		var models []User
-		if err := tx.Find(&models).Error; err != nil {
+		if err := tx.Select([]string{
+			"id",
+			"created_at",
+			"modified_at",
+			"comment",
+			"ip",
+			"location",
+			"administrator",
+			"disabled",
+		}).Find(&models).Error; err != nil {
 			return err
 		}
 		results = make([]*User, 0, len(models))
-		for i, _ := range models {
-			results = append(results, &models[i])
+		for index := range models {
+			results = append(results, &models[index])
 		}
 		return nil
 	}); err != nil {
@@ -25,11 +34,11 @@ func (self *database) ListUsers() ([]*User, error) {
 	return results, nil
 }
 
-func (self *database) GetUser(id string) (*User, error) {
+func (self *database) GetUser(userId string) (*User, error) {
 	var result *User
 	if err := self.db.Transaction(func(tx *gorm.DB) error {
 		var model User
-		if err := tx.Where("id = ?", id).First(&model).Error; err != nil {
+		if err := tx.Where("id = ?", userId).First(&model).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil
 			}
@@ -43,12 +52,12 @@ func (self *database) GetUser(id string) (*User, error) {
 	return result, nil
 }
 
-func (self *database) PutUser(id string, modifier func(*User) error) (*User, error) {
+func (self *database) PutUser(userId string, modifier func(*User) error) (*User, error) {
 	var result *User
 	if err := self.db.Transaction(func(tx *gorm.DB) error {
 		var create bool
 		var model User
-		if err := tx.Where("id = ?", id).First(&model).Error; err != nil {
+		if err := tx.Where("id = ?", userId).First(&model).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				create = true
 			} else {
@@ -58,12 +67,12 @@ func (self *database) PutUser(id string, modifier func(*User) error) (*User, err
 		if err := modifier(&model); err != nil {
 			return err
 		}
-		model.ID = id
+		model.ID = userId
 		now := time.Now().In(time.Local)
 		if create {
-			model.Created = now
+			model.CreatedAt = now
 		}
-		model.Modified = now
+		model.ModifiedAt = now
 		if create {
 			if err := tx.Create(&model).Error; err != nil {
 				return err

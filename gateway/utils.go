@@ -36,13 +36,13 @@ func unmarshalForwardRequest(payload []byte) (*forwardRequest, error) {
 	return request, nil
 }
 
-type forwardReply struct {
-	Port uint32
-}
+// type forwardReply struct {
+// 	Port uint32
+// }
 
-func marshalForwardReply(reply *forwardReply) []byte {
-	return ssh.Marshal(reply)
-}
+// func marshalForwardReply(reply *forwardReply) []byte {
+// 	return ssh.Marshal(reply)
+// }
 
 type tunnelData struct {
 	Host          string
@@ -74,31 +74,31 @@ func marshalTunnelData(data *tunnelData) []byte {
 	return ssh.Marshal(data)
 }
 
-type executeRequest struct {
-	Command string
-}
+// type executeRequest struct {
+// 	Command string
+// }
 
-func unmarshalExecuteRequest(payload []byte) (*executeRequest, error) {
-	request := &executeRequest{}
+// func unmarshalExecuteRequest(payload []byte) (*executeRequest, error) {
+// 	request := &executeRequest{}
 
-	if err := ssh.Unmarshal(payload, request); err != nil {
-		return nil, err
-	}
+// 	if err := ssh.Unmarshal(payload, request); err != nil {
+// 		return nil, err
+// 	}
 
-	return request, nil
-}
+// 	return request, nil
+// }
 
 type usageStats struct {
 	bytesRead    uint64
 	bytesWritten uint64
-	created      time.Time
-	used         time.Time
+	createdAt    time.Time
+	usedAt       time.Time
 }
 
 func newUsage() *usageStats {
 	return &usageStats{
-		created: time.Now(),
-		used:    time.Now(),
+		createdAt: time.Now(),
+		usedAt:    time.Now(),
 	}
 }
 
@@ -110,9 +110,9 @@ func (u *usageStats) write(bytesWritten uint64) {
 	u.update(0, bytesWritten)
 }
 
-func (u *usageStats) use() {
-	u.update(0, 0)
-}
+// func (u *usageStats) use() {
+// 	u.update(0, 0)
+// }
 
 func (u *usageStats) update(bytesRead, bytesWritten uint64) {
 	if bytesRead > 0 {
@@ -121,7 +121,7 @@ func (u *usageStats) update(bytesRead, bytesWritten uint64) {
 	if bytesWritten > 0 {
 		atomic.AddUint64(&u.bytesWritten, bytesWritten)
 	}
-	u.used = time.Now()
+	u.usedAt = time.Now()
 }
 
 type wrappedConn struct {

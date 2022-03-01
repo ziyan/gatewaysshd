@@ -27,6 +27,7 @@ type Gateway interface {
 
 	ListUsers() (interface{}, error)
 	GetUser(string) (interface{}, error)
+	GetUserScreenshot(string) ([]byte, error)
 }
 
 type gateway struct {
@@ -153,7 +154,7 @@ func (self *gateway) listConnections() []*connection {
 // scavenge timed out connections
 func (self *gateway) ScavengeConnections(timeout time.Duration) {
 	for _, connection := range self.listConnections() {
-		idle := time.Since(connection.getUsed())
+		idle := time.Since(connection.getUsedAt())
 		if idle > timeout {
 			log.Infof("scavenge: connection %s timed out after %s", connection, idle)
 			connection.close()
@@ -214,8 +215,8 @@ func (self *gateway) ListUsers() (interface{}, error) {
 	}, nil
 }
 
-func (self *gateway) GetUser(id string) (interface{}, error) {
-	user, err := self.database.GetUser(id)
+func (self *gateway) GetUser(userId string) (interface{}, error) {
+	user, err := self.database.GetUser(userId)
 	if err != nil {
 		return nil, err
 	}
@@ -241,4 +242,15 @@ func (self *gateway) GetUser(id string) (interface{}, error) {
 	return map[string]interface{}{
 		"user": user,
 	}, nil
+}
+
+func (self *gateway) GetUserScreenshot(userId string) ([]byte, error) {
+	user, err := self.database.GetUser(userId)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, nil
+	}
+	return user.Screenshot, nil
 }

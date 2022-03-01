@@ -32,5 +32,5 @@ func Run(version, commit string, args []string) {
 		return nil
 	}
 	app.Action = run
-	app.Run(args)
+	_ = app.Run(args)
 }

@@ -11,10 +11,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jinzhu/gorm"
 	"github.com/op/go-logging"
-
-	_ "github.com/jinzhu/gorm/dialects/postgres"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 var log = logging.MustGetLogger("db")
@@ -37,49 +37,33 @@ type database struct {
 
 func Open(host string, port uint16, user, password, dbname string) (Database, error) {
 	connection := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", host, port, user, password, dbname)
-	db, err := gorm.Open("postgres", connection)
+	db, err := gorm.Open(postgres.Open(connection), &gorm.Config{
+		Logger: logger.New(
+			&logWriter{},
+			logger.Config{
+				SlowThreshold:             10 * time.Millisecond,
+				LogLevel:                  logger.Silent,
+				IgnoreRecordNotFoundError: true,
+				Colorful:                  true,
+			},
+		),
+	})
 	if err != nil {
 		return nil, err
 	}
 	self := &database{
 		db: db.Debug(),
 	}
-	self.db.SetLogger(self)
 	return self, nil
 }
 
 func (self *database) Close() error {
-	return self.db.Close()
+	return nil
 }
 
-// for logging from gorm package
-func (self *database) Print(values ...interface{}) {
-	if len(values) < 2 {
-		log.Debugf("%q", values)
-		return
-	}
-	component := values[0].(string)
-	filenameWithLine := values[1].(string)
-	values = values[2:]
-	switch component {
-	case "sql":
-		if len(values) != 4 {
-			return
-		}
-		duration := values[0].(time.Duration)
-		sql := values[1].(string)
-		// variables := values[2] // variables can get really big
-		rowsAffected := values[3].(int64)
-		log.Debugf("took %s to execute sql %s, affected %d rows, called from %s", duration, sql, rowsAffected, filenameWithLine)
-	case "error":
-		if len(values) != 1 {
-			return
-		}
-		err := values[0].(error)
-		log.Errorf("%s, called from %s", err, filenameWithLine)
-	case "log":
-		log.Debugf("%q, called from %s", values, filenameWithLine)
-	default:
-		log.Debugf("%q", values)
-	}
+type logWriter struct {
+}
+
+func (self *logWriter) Printf(format string, arguments ...interface{}) {
+	log.Debugf(format, arguments...)
 }

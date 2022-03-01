@@ -118,14 +118,14 @@ func (self *connection) close() {
 }
 
 // tunnels within a ssh connection
-func (self *connection) listTunnels() []*tunnel {
-	self.lock.Lock()
-	defer self.lock.Unlock()
+// func (self *connection) listTunnels() []*tunnel {
+// 	self.lock.Lock()
+// 	defer self.lock.Unlock()
 
-	tunnels := make([]*tunnel, len(self.tunnels))
-	copy(tunnels, self.tunnels)
-	return tunnels
-}
+// 	tunnels := make([]*tunnel, len(self.tunnels))
+// 	copy(tunnels, self.tunnels)
+// 	return tunnels
+// }
 
 func (self *connection) addTunnel(t *tunnel) {
 	self.lock.Lock()
@@ -151,29 +151,29 @@ func (self *connection) deleteTunnel(t *tunnel) {
 }
 
 // returns the last used time of the connection
-func (self *connection) getUsed() time.Time {
+func (self *connection) getUsedAt() time.Time {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
-	return self.usage.used
+	return self.usage.usedAt
 }
 
 // returns the list of services this connection advertises
-func (self *connection) listServices() map[string][]uint16 {
-	self.lock.Lock()
-	defer self.lock.Unlock()
+// func (self *connection) listServices() map[string][]uint16 {
+// 	self.lock.Lock()
+// 	defer self.lock.Unlock()
 
-	services := make(map[string][]uint16)
-	for host, ports := range self.services {
-		for port, ok := range ports {
-			if ok {
-				services[host] = append(services[host], port)
-			}
-		}
-	}
+// 	services := make(map[string][]uint16)
+// 	for host, ports := range self.services {
+// 		for port, ok := range ports {
+// 			if ok {
+// 				services[host] = append(services[host], port)
+// 			}
+// 		}
+// 	}
 
-	return services
-}
+// 	return services
+// }
 
 func (self *connection) reportStatus(status json.RawMessage) error {
 	if _, err := self.gateway.database.PutUser(self.user, func(model *db.User) error {
@@ -186,11 +186,22 @@ func (self *connection) reportStatus(status json.RawMessage) error {
 	return nil
 }
 
+func (self *connection) reportScreenshot(screenshot []byte) error {
+	if _, err := self.gateway.database.PutUser(self.user, func(model *db.User) error {
+		model.Screenshot = screenshot
+		return nil
+	}); err != nil {
+		log.Errorf("%s: failed to save user in database: %s", self, err)
+		return err
+	}
+	return nil
+}
+
 type connectionStatus struct {
 	ID string `json:"id,omitempty"`
 
-	Created time.Time `json:"created,omitempty"`
-	Used    time.Time `json:"used,omitempty"`
+	CreatedAt time.Time `json:"createdAt,omitempty"`
+	UsedAt    time.Time `json:"usedAt,omitempty"`
 
 	User                 string `json:"user,omitempty"`
 	Administrator        bool   `json:"administrator,omitempty"`
@@ -240,10 +251,10 @@ func (self *connection) gatherStatus() *connectionStatus {
 		TunnelsActive:        uint64(len(tunnels)),
 		TunnelsOpened:        self.tunnelsOpened,
 		TunnelsClosed:        self.tunnelsClosed,
-		Created:              self.usage.created,
-		Used:                 self.usage.used,
-		UpTime:               uint64(time.Since(self.usage.created).Seconds()),
-		IdleTime:             uint64(time.Since(self.usage.used).Seconds()),
+		CreatedAt:            self.usage.createdAt,
+		UsedAt:               self.usage.usedAt,
+		UpTime:               uint64(time.Since(self.usage.createdAt).Seconds()),
+		IdleTime:             uint64(time.Since(self.usage.usedAt).Seconds()),
 		BytesRead:            self.usage.bytesRead,
 		BytesWritten:         self.usage.bytesWritten,
 		Services:             services,

@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/term"
 )
 
 var (
@@ -21,7 +21,7 @@ var (
 type service struct {
 	connection *connection
 	channel    ssh.Channel
-	terminal   *terminal.Terminal
+	terminal   *term.Terminal
 }
 
 func runService(command string, connection *connection, channel ssh.Channel) error {
@@ -30,7 +30,7 @@ func runService(command string, connection *connection, channel ssh.Channel) err
 		channel:    channel,
 	}
 	if len(command) == 0 {
-		self.terminal = terminal.NewTerminal(channel, "")
+		self.terminal = term.NewTerminal(channel, "")
 		return self.handleShell()
 	}
 	if err := self.handleCommand(splitCommand(command)); err != nil {
@@ -47,16 +47,16 @@ func runService(command string, connection *connection, channel ssh.Channel) err
 	return nil
 }
 
-func (self *service) unmarshal(v interface{}) error {
-	input, err := self.read("json> ")
-	if err != nil {
-		return err
-	}
-	if err := json.Unmarshal(input, v); err != nil {
-		return err
-	}
-	return nil
-}
+// func (self *service) unmarshal(v interface{}) error {
+// 	input, err := self.read("json> ")
+// 	if err != nil {
+// 		return err
+// 	}
+// 	if err := json.Unmarshal(input, v); err != nil {
+// 		return err
+// 	}
+// 	return nil
+// }
 
 func (self *service) marshal(v interface{}) error {
 	output, err := json.MarshalIndent(v, "", "  ")
@@ -66,17 +66,17 @@ func (self *service) marshal(v interface{}) error {
 	return self.write(append(output, byte('\n')))
 }
 
-func (self *service) read(prompt string) ([]byte, error) {
-	if self.terminal != nil {
-		self.terminal.SetPrompt(prompt)
-		line, err := self.terminal.ReadLine()
-		if err != nil {
-			return nil, err
-		}
-		return []byte(line), nil
-	}
-	return ioutil.ReadAll(self.channel)
-}
+// func (self *service) read(prompt string) ([]byte, error) {
+// 	if self.terminal != nil {
+// 		self.terminal.SetPrompt(prompt)
+// 		line, err := self.terminal.ReadLine()
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 		return []byte(line), nil
+// 	}
+// 	return ioutil.ReadAll(self.channel)
+// }
 
 func (self *service) write(data []byte) error {
 	if self.terminal != nil {
@@ -92,7 +92,9 @@ func (self *service) write(data []byte) error {
 }
 
 func (self *service) handleShell() error {
-	self.write([]byte(fmt.Sprintf("Welcome to gatewaysshd version %s! Type \"help\" to get a list of available commands.\n", self.connection.gateway.settings.Version)))
+	if err := self.write([]byte(fmt.Sprintf("Welcome to gatewaysshd version %s! Type \"help\" to get a list of available commands.\n", self.connection.gateway.settings.Version))); err != nil {
+		return err
+	}
 	for {
 		self.terminal.SetPrompt("gatewaysshd> ")
 		line, err := self.terminal.ReadLine()
@@ -111,8 +113,8 @@ func (self *service) handleShell() error {
 			return nil
 		}
 		if err := self.handleCommand(splitCommand(line)); err != nil {
-			if _, err2 := self.terminal.Write([]byte(fmt.Sprintf("ERROR: %s\n", err))); err2 != nil {
-				return err2
+			if _, err := self.terminal.Write([]byte(fmt.Sprintf("ERROR: %s\n", err))); err != nil {
+				return err
 			}
 			continue
 		}
@@ -129,6 +131,8 @@ func (self *service) handleCommand(command []string) error {
 		return self.version()
 	case len(command) == 1 && command[0] == "reportStatus":
 		return self.reportStatus()
+	case len(command) == 1 && command[0] == "reportScreenshot":
+		return self.reportScreenshot()
 	}
 
 	if !self.connection.permitPortForwarding {
@@ -158,32 +162,32 @@ func (self *service) handleCommand(command []string) error {
 
 func (self *service) help() error {
 	content := []string{
-		fmt.Sprintf("Available commands:"),
+		"Available commands:",
 		"",
 	}
 
 	if self.connection.permitPortForwarding {
 		content = append(content, []string{
-			fmt.Sprintf("    status [username] - show gateway status, optionally filter by username"),
-			fmt.Sprintf("    listUsers - list all users in database"),
-			fmt.Sprintf("    getUser <username> - get details about a user from database"),
+			"    status [username] - show gateway status, optionally filter by username",
+			"    listUsers - list all users in database",
+			"    getUser <username> - get details about a user from database",
 			"",
 		}...)
 	}
 
 	if self.connection.administrator {
 		content = append(content, []string{
-			fmt.Sprintf("    kickUser <username> - close connections from a user"),
+			"    kickUser <username> - close connections from a user",
 			"",
 		}...)
 	}
 
 	content = append(content, []string{
-		fmt.Sprintf("    exit - exit shell"),
-		fmt.Sprintf("    quit - same as exit"),
-		fmt.Sprintf("    help - display this help message"),
-		fmt.Sprintf("    version - show server version"),
-		fmt.Sprintf("    ping - ping server"),
+		"    exit - exit shell",
+		"    quit - same as exit",
+		"    help - display this help message",
+		"    version - show server version",
+		"    ping - ping server",
 		"",
 		"",
 	}...)
@@ -236,6 +240,22 @@ func (self *service) reportStatus() error {
 
 	// save the result
 	return self.connection.reportStatus(status)
+}
+
+func (self *service) reportScreenshot() error {
+	if self.terminal != nil {
+		return fmt.Errorf("gateway: this command cannot be run in shell")
+	}
+
+	// read all data from session
+	screenshot, err := ioutil.ReadAll(self.channel)
+	if err != nil {
+		log.Errorf("%s: failed to read all: %s", self, err)
+		return err
+	}
+
+	// save the result
+	return self.connection.reportScreenshot(screenshot)
 }
 
 func (self *service) listUsers() error {

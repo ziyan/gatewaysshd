@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/pprof"
-	"strings"
+
+	"github.com/gorilla/mux"
 
 	"github.com/ziyan/gatewaysshd/gateway"
 )
@@ -26,6 +26,16 @@ func wrapHttpHandler(handler func(*http.Request) (interface{}, error)) func(http
 			http.Error(response, "500 internal server error", http.StatusInternalServerError)
 			return
 		}
+		if handler, ok := result.(http.Handler); ok {
+			// allow returned handler to handle the request
+			handler.ServeHTTP(response, request)
+			return
+		}
+		if handler, ok := result.(http.HandlerFunc); ok {
+			// allow returned handler to handle the request
+			handler(response, request)
+			return
+		}
 
 		raw, err := json.Marshal(result)
 		if err != nil {
@@ -35,21 +45,17 @@ func wrapHttpHandler(handler func(*http.Request) (interface{}, error)) func(http
 		}
 
 		response.Header().Set("Content-Type", "application/json; charset=utf-8")
-		response.Write(raw)
+		_, _ = response.Write(raw)
 	}
 }
 
 func newHttpHandler(gateway gateway.Gateway, enablePprof bool) http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/user", wrapHttpHandler(func(request *http.Request) (interface{}, error) {
+	router := mux.NewRouter().StrictSlash(true)
+	router.Path("/api/user").HandlerFunc(wrapHttpHandler(func(request *http.Request) (interface{}, error) {
 		return gateway.ListUsers()
 	}))
-	mux.HandleFunc("/api/user/", wrapHttpHandler(func(request *http.Request) (interface{}, error) {
-		parts := strings.Split(request.URL.Path, "/")
-		if len(parts) != 4 {
-			return nil, ErrNotFound
-		}
-		user, err := gateway.GetUser(parts[3])
+	router.Path("/api/user/{userId}").HandlerFunc(wrapHttpHandler(func(request *http.Request) (interface{}, error) {
+		user, err := gateway.GetUser(mux.Vars(request)["userId"])
 		if err != nil {
 			return nil, err
 		}
@@ -58,13 +64,18 @@ func newHttpHandler(gateway gateway.Gateway, enablePprof bool) http.Handler {
 		}
 		return user, nil
 	}))
-
-	if enablePprof {
-		mux.HandleFunc("/debug/pprof/", pprof.Index)
-		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-	}
-	return mux
+	router.Path("/api/user/{userId}/screenshot").HandlerFunc(wrapHttpHandler(func(request *http.Request) (interface{}, error) {
+		screenshot, err := gateway.GetUserScreenshot(mux.Vars(request)["userId"])
+		if err != nil {
+			return nil, err
+		}
+		if len(screenshot) == 0 {
+			return nil, ErrNotFound
+		}
+		return func(response http.ResponseWriter, request *http.Request) {
+			response.Header().Set("Content-Type", "image/png")
+			_, _ = response.Write(screenshot)
+		}, nil
+	}))
+	return router
 }
