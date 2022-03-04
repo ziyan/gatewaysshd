@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/ioutil"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/term"
@@ -195,7 +196,22 @@ func (self *service) help() error {
 }
 
 func (self *service) ping() error {
-	return self.write([]byte("pong\n"))
+	data, err := json.Marshal(map[string]interface{}{
+		"version": self.connection.gateway.settings.Version,
+		"services": []string{
+			"ping",
+			"reportStatus",
+			"reportScreenshot",
+		},
+		"now": time.Now().In(time.Local),
+	})
+	if err != nil {
+		return err
+	}
+	if err := self.write(data); err != nil {
+		return err
+	}
+	return self.write([]byte("\n"))
 }
 
 func (self *service) version() error {
