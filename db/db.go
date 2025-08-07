@@ -4,7 +4,6 @@
 // group - store group, principal regex, principal validity
 // user - store user special attributes, such as non-ldap user, groups
 // certificates - store signed certificates, key by username/serial
-//
 package db
 
 import (
