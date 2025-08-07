@@ -39,6 +39,8 @@ lint:
 	if ! hash golangci-lint >/dev/null 2>&1; then \
 		go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.2; \
 	fi; \
+	go mod download; \
+	golangci-lint cache clean; \
 	golangci-lint run
 
 # run tests

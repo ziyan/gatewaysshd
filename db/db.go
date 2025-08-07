@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/op/go-logging"
+	logging "github.com/op/go-logging"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net"
 
-	"github.com/op/go-logging"
+	logging "github.com/op/go-logging"
 	"github.com/oschwald/geoip2-golang"
 	"golang.org/x/crypto/ssh"
 

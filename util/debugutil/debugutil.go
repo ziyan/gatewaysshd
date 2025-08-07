@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"runtime/pprof"
 
-	"github.com/op/go-logging"
+	logging "github.com/op/go-logging"
 )
 
 var log = logging.MustGetLogger("debugutil")
