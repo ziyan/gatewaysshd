@@ -1,12 +1,9 @@
 run:
   timeout: 10m
-  go: "1.23"
+  go: "1.24"
 
 issues:
-  exclude-dirs:
-    - vendor
   exclude-use-default: false
-  exclude-generated-strict: false
 
 linters-settings:
   gocritic:
@@ -15,7 +12,6 @@ linters-settings:
       - singleCaseSwitch
 
 linters:
-  disable-all: true
   enable:
     - errcheck
     - gosimple
@@ -23,4 +19,6 @@ linters:
     - ineffassign
     - staticcheck
     - unused
+    - gosec
+    - gocritic
     - misspell

@@ -91,7 +91,11 @@ func (self *authenticator) lookupLocation(ip net.IP) db.Location {
 	if err != nil {
 		return location
 	}
-	defer d.Close()
+	defer func() {
+		if err := d.Close(); err != nil {
+			log.Warningf("failed to close geoip database: %v", err)
+		}
+	}()
 
 	r, err := d.City(ip)
 	if err != nil {

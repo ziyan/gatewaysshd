@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"time"
 )
 
 func RunDebugServer(endpoint string) (func(), error) {
@@ -21,7 +22,8 @@ func RunDebugServer(endpoint string) (func(), error) {
 	debugHandler.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	debugHandler.HandleFunc("/debug/pprof/trace", pprof.Trace)
 	debugServer := &http.Server{
-		Handler: debugHandler,
+		Handler:           debugHandler,
+		ReadHeaderTimeout: 30 * time.Second,
 	}
 	go func() {
 		log.Debugf("running and serving debug endpoint")

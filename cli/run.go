@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -66,7 +67,11 @@ func run(c *cli.Context) error {
 	}
 
 	// open database
-	database, err := db.Open(c.String("postgres-host"), uint16(c.Uint("postgres-port")), c.String("postgres-user"), c.String("postgres-password"), c.String("postgres-dbname"))
+	pgPort := c.Uint("postgres-port")
+	if pgPort > 65535 {
+		return fmt.Errorf("postgres port %d is out of range (max 65535)", pgPort)
+	}
+	database, err := db.Open(c.String("postgres-host"), uint16(pgPort), c.String("postgres-user"), c.String("postgres-password"), c.String("postgres-dbname"))
 	if err != nil {
 		log.Errorf("failed to open database: %s", err)
 		return err
@@ -132,8 +137,9 @@ func run(c *cli.Context) error {
 	httpRunning := make(chan struct{})
 	if c.String("listen-http") != "" {
 		httpServer = &http.Server{
-			Addr:    c.String("listen-http"),
-			Handler: newHttpHandler(gateway),
+			Addr:              c.String("listen-http"),
+			Handler:           newHttpHandler(gateway),
+			ReadHeaderTimeout: 30 * time.Second,
 		}
 		waitGroup.Add(1)
 		go func() {

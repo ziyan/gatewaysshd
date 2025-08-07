@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
+
 	"strings"
 	"time"
 
@@ -238,10 +238,14 @@ func (self *service) reportStatus() error {
 		log.Errorf("%s: failed to decompress: %s", self, err)
 		return err
 	}
-	defer reader.Close()
+	defer func() {
+		if err := reader.Close(); err != nil {
+			log.Warningf("failed to close reader: %v", err)
+		}
+	}()
 
 	// read all data from session
-	raw, err := ioutil.ReadAll(reader)
+	raw, err := io.ReadAll(reader)
 	if err != nil {
 		log.Errorf("%s: failed to read all: %s", self, err)
 		return err
@@ -264,7 +268,7 @@ func (self *service) reportScreenshot() error {
 	}
 
 	// read all data from session
-	screenshot, err := ioutil.ReadAll(self.channel)
+	screenshot, err := io.ReadAll(self.channel)
 	if err != nil {
 		log.Errorf("%s: failed to read all: %s", self, err)
 		return err

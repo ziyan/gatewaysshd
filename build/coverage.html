@@ -206,9 +206,13 @@ func (self *authenticator) lookupLocation(ip net.IP) db.Location <span class="co
         if err != nil </span><span class="cov0" title="0">{
                 return location
         }</span>
-        <span class="cov0" title="0">defer d.Close()
+        <span class="cov0" title="0">defer func() </span><span class="cov0" title="0">{
+                if err := d.Close(); err != nil </span><span class="cov0" title="0">{
+                        log.Warningf("failed to close geoip database: %v", err)
+                }</span>
+        }()
 
-        r, err := d.City(ip)
+        <span class="cov0" title="0">r, err := d.City(ip)
         if err != nil </span><span class="cov0" title="0">{
                 return location
         }</span>
@@ -267,7 +271,7 @@ func Run(version, commit string, args []string) <span class="cov0" title="0">{
 		<pre class="file" id="file2" style="display: none">package cli
 
 import (
-        "io/ioutil"
+        "os"
         "time"
 
         "github.com/urfave/cli"
@@ -359,7 +363,7 @@ var flags = []cli.Flag{
 
 func parseCaPublicKeys(c *cli.Context) ([]ssh.PublicKey, error) <span class="cov0" title="0">{
         // get the keys
-        caPublicKeyRaw, err := ioutil.ReadFile(c.String("ca-public-key"))
+        caPublicKeyRaw, err := os.ReadFile(c.String("ca-public-key"))
         if err != nil </span><span class="cov0" title="0">{
                 return nil, err
         }</span>
@@ -377,7 +381,7 @@ func parseCaPublicKeys(c *cli.Context) ([]ssh.PublicKey, error) <span class="cov
 
 func parseHostSigner(c *cli.Context) (ssh.Signer, error) <span class="cov0" title="0">{
         // parse host private key
-        hostPrivateKeyRaw, err := ioutil.ReadFile(c.String("host-private-key"))
+        hostPrivateKeyRaw, err := os.ReadFile(c.String("host-private-key"))
         if err != nil </span><span class="cov0" title="0">{
                 return nil, err
         }</span>
@@ -387,7 +391,7 @@ func parseHostSigner(c *cli.Context) (ssh.Signer, error) <span class="cov0" titl
         }</span>
 
         // parse host certificate
-        <span class="cov0" title="0">hostPublicKeyRaw, err := ioutil.ReadFile(c.String("host-public-key"))
+        <span class="cov0" title="0">hostPublicKeyRaw, err := os.ReadFile(c.String("host-public-key"))
         if err != nil </span><span class="cov0" title="0">{
                 return nil, err
         }</span>
@@ -498,6 +502,7 @@ func newHttpHandler(gateway gateway.Gateway) http.Handler <span class="cov0" tit
 
 import (
         "context"
+        "fmt"
         "net"
         "net/http"
         "os"
@@ -562,7 +567,11 @@ func run(c *cli.Context) error <span class="cov0" title="0">{
         }
 
         // open database
-        <span class="cov0" title="0">database, err := db.Open(c.String("postgres-host"), uint16(c.Uint("postgres-port")), c.String("postgres-user"), c.String("postgres-password"), c.String("postgres-dbname"))
+        <span class="cov0" title="0">pgPort := c.Uint("postgres-port")
+        if pgPort &gt; 65535 </span><span class="cov0" title="0">{
+                return fmt.Errorf("postgres port %d is out of range (max 65535)", pgPort)
+        }</span>
+        <span class="cov0" title="0">database, err := db.Open(c.String("postgres-host"), uint16(pgPort), c.String("postgres-user"), c.String("postgres-password"), c.String("postgres-dbname"))
         if err != nil </span><span class="cov0" title="0">{
                 log.Errorf("failed to open database: %s", err)
                 return err
@@ -628,8 +637,9 @@ func run(c *cli.Context) error <span class="cov0" title="0">{
         httpRunning := make(chan struct{})
         if c.String("listen-http") != "" </span><span class="cov0" title="0">{
                 httpServer = &amp;http.Server{
-                        Addr:    c.String("listen-http"),
-                        Handler: newHttpHandler(gateway),
+                        Addr:              c.String("listen-http"),
+                        Handler:           newHttpHandler(gateway),
+                        ReadHeaderTimeout: 30 * time.Second,
                 }
                 waitGroup.Add(1)
                 go func() </span><span class="cov0" title="0">{
@@ -1426,6 +1436,9 @@ func (self *connection) handleRequest(request *ssh.Request) error <span class="c
                         return err
                 }</span>
 
+                <span class="cov0" title="0">if request.Port &gt; 65535 </span><span class="cov0" title="0">{
+                        return fmt.Errorf("port %d is out of range (max 65535)", request.Port)
+                }</span>
                 <span class="cov0" title="0">if err := self.registerService(request.Host, uint16(request.Port)); err != nil </span><span class="cov0" title="0">{
                         log.Errorf("%s: failed to register service in connection: %s", self, err)
                         return err
@@ -1439,6 +1452,9 @@ func (self *connection) handleRequest(request *ssh.Request) error <span class="c
                         return err
                 }</span>
 
+                <span class="cov0" title="0">if request.Port &gt; 65535 </span><span class="cov0" title="0">{
+                        return fmt.Errorf("port %d is out of range (max 65535)", request.Port)
+                }</span>
                 <span class="cov0" title="0">if err := self.deregisterService(request.Host, uint16(request.Port)); err != nil </span><span class="cov0" title="0">{
                         log.Errorf("%s: failed to register service in connection: %s", self, err)
                         return err
@@ -1533,7 +1549,11 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
         }</span>
 
         // look up connection by name
-        <span class="cov0" title="0">otherConnection, host, port := self.gateway.lookupConnectionService(data.Host, uint16(data.Port))
+        <span class="cov0" title="0">if data.Port &gt; 65535 </span><span class="cov0" title="0">{
+                return false, ssh.ConnectionFailed, fmt.Sprintf("port %d is out of range (max 65535)", data.Port), nil
+        }</span>
+        <span class="cov0" title="0">portU16 := uint16(data.Port) // #nosec G115 - safe: checked above for range
+        otherConnection, host, port := self.gateway.lookupConnectionService(data.Host, portU16)
         if otherConnection == nil </span><span class="cov0" title="0">{
                 return false, ssh.ConnectionFailed, "service not found or not online", nil
         }</span>
@@ -1882,7 +1902,7 @@ import (
         "errors"
         "fmt"
         "io"
-        "io/ioutil"
+
         "strings"
         "time"
 
@@ -2114,10 +2134,14 @@ func (self *service) reportStatus() error <span class="cov0" title="0">{
                 log.Errorf("%s: failed to decompress: %s", self, err)
                 return err
         }</span>
-        <span class="cov0" title="0">defer reader.Close()
+        <span class="cov0" title="0">defer func() </span><span class="cov0" title="0">{
+                if err := reader.Close(); err != nil </span><span class="cov0" title="0">{
+                        log.Warningf("failed to close reader: %v", err)
+                }</span>
+        }()
 
         // read all data from session
-        raw, err := ioutil.ReadAll(reader)
+        <span class="cov0" title="0">raw, err := io.ReadAll(reader)
         if err != nil </span><span class="cov0" title="0">{
                 log.Errorf("%s: failed to read all: %s", self, err)
                 return err
@@ -2140,7 +2164,7 @@ func (self *service) reportScreenshot() error <span class="cov0" title="0">{
         }</span>
 
         // read all data from session
-        <span class="cov0" title="0">screenshot, err := ioutil.ReadAll(self.channel)
+        <span class="cov0" title="0">screenshot, err := io.ReadAll(self.channel)
         if err != nil </span><span class="cov0" title="0">{
                 log.Errorf("%s: failed to read all: %s", self, err)
                 return err
@@ -2516,8 +2540,8 @@ func wrapConn(conn net.Conn, usage *usageStats) *wrappedConn <span class="cov0" 
 // override read to keep track of data usage
 func (self *wrappedConn) Read(data []byte) (int, error) <span class="cov0" title="0">{
         size, err := self.conn.Read(data)
-        if err == nil </span><span class="cov0" title="0">{
-                self.usage.read(uint64(size))
+        if err == nil &amp;&amp; size &gt;= 0 </span><span class="cov0" title="0">{
+                self.usage.read(uint64(size)) // safe: size from Read is always non-negative
         }</span>
         <span class="cov0" title="0">return size, err</span>
 }
@@ -2525,8 +2549,8 @@ func (self *wrappedConn) Read(data []byte) (int, error) <span class="cov0" title
 // override write to keep track of data usage
 func (self *wrappedConn) Write(data []byte) (int, error) <span class="cov0" title="0">{
         size, err := self.conn.Write(data)
-        if err == nil </span><span class="cov0" title="0">{
-                self.usage.write(uint64(size))
+        if err == nil &amp;&amp; size &gt;= 0 </span><span class="cov0" title="0">{
+                self.usage.write(uint64(size)) // safe: size from Write is always non-negative
         }</span>
         <span class="cov0" title="0">return size, err</span>
 }
@@ -2586,6 +2610,7 @@ import (
         "net"
         "net/http"
         "net/http/pprof"
+        "time"
 )
 
 func RunDebugServer(endpoint string) (func(), error) <span class="cov0" title="0">{
@@ -2602,7 +2627,8 @@ func RunDebugServer(endpoint string) (func(), error) <span class="cov0" title="0
         debugHandler.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
         debugHandler.HandleFunc("/debug/pprof/trace", pprof.Trace)
         debugServer := &amp;http.Server{
-                Handler: debugHandler,
+                Handler:           debugHandler,
+                ReadHeaderTimeout: 30 * time.Second,
         }
         go func() </span><span class="cov0" title="0">{
                 log.Debugf("running and serving debug endpoint")

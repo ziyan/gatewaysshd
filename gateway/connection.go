@@ -317,6 +317,9 @@ func (self *connection) handleRequest(request *ssh.Request) error {
 			return err
 		}
 
+		if request.Port > 65535 {
+			return fmt.Errorf("port %d is out of range (max 65535)", request.Port)
+		}
 		if err := self.registerService(request.Host, uint16(request.Port)); err != nil {
 			log.Errorf("%s: failed to register service in connection: %s", self, err)
 			return err
@@ -330,6 +333,9 @@ func (self *connection) handleRequest(request *ssh.Request) error {
 			return err
 		}
 
+		if request.Port > 65535 {
+			return fmt.Errorf("port %d is out of range (max 65535)", request.Port)
+		}
 		if err := self.deregisterService(request.Host, uint16(request.Port)); err != nil {
 			log.Errorf("%s: failed to register service in connection: %s", self, err)
 			return err
@@ -424,7 +430,11 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 	}
 
 	// look up connection by name
-	otherConnection, host, port := self.gateway.lookupConnectionService(data.Host, uint16(data.Port))
+	if data.Port > 65535 {
+		return false, ssh.ConnectionFailed, fmt.Sprintf("port %d is out of range (max 65535)", data.Port), nil
+	}
+	portU16 := uint16(data.Port) // #nosec G115 - safe: checked above for range
+	otherConnection, host, port := self.gateway.lookupConnectionService(data.Host, portU16)
 	if otherConnection == nil {
 		return false, ssh.ConnectionFailed, "service not found or not online", nil
 	}
