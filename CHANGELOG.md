@@ -1,3 +1,10 @@
+# 0.3.0 (2025-08-07)
+
+## Features
+
+- Upgrade all deps
+
+
 # 0.2.6 (2022-03-01)
 
 ## Features
