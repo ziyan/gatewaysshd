@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/op/go-logging"
+	logging "github.com/op/go-logging"
 	"golang.org/x/crypto/ssh"
 
 	"github.com/ziyan/gatewaysshd/db"

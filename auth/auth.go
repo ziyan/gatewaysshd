@@ -5,8 +5,8 @@ import (
 	"errors"
 	"net"
 
-	"github.com/op/go-logging"
-	"github.com/oschwald/geoip2-golang"
+	logging "github.com/op/go-logging"
+	geoip2 "github.com/oschwald/geoip2-golang"
 	"golang.org/x/crypto/ssh"
 
 	"github.com/ziyan/gatewaysshd/db"
@@ -91,7 +91,11 @@ func (self *authenticator) lookupLocation(ip net.IP) db.Location {
 	if err != nil {
 		return location
 	}
-	defer d.Close()
+	defer func() {
+		if err := d.Close(); err != nil {
+			log.Warningf("failed to close geoip database: %v", err)
+		}
+	}()
 
 	r, err := d.City(ip)
 	if err != nil {

@@ -139,8 +139,8 @@ func wrapConn(conn net.Conn, usage *usageStats) *wrappedConn {
 // override read to keep track of data usage
 func (self *wrappedConn) Read(data []byte) (int, error) {
 	size, err := self.conn.Read(data)
-	if err == nil {
-		self.usage.read(uint64(size))
+	if err == nil && size >= 0 {
+		self.usage.read(uint64(size)) // safe: size from Read is always non-negative
 	}
 	return size, err
 }
@@ -148,8 +148,8 @@ func (self *wrappedConn) Read(data []byte) (int, error) {
 // override write to keep track of data usage
 func (self *wrappedConn) Write(data []byte) (int, error) {
 	size, err := self.conn.Write(data)
-	if err == nil {
-		self.usage.write(uint64(size))
+	if err == nil && size >= 0 {
+		self.usage.write(uint64(size)) // safe: size from Write is always non-negative
 	}
 	return size, err
 }

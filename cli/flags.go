@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"io/ioutil"
+	"os"
 	"time"
 
 	"github.com/urfave/cli"
@@ -93,7 +93,7 @@ var flags = []cli.Flag{
 
 func parseCaPublicKeys(c *cli.Context) ([]ssh.PublicKey, error) {
 	// get the keys
-	caPublicKeyRaw, err := ioutil.ReadFile(c.String("ca-public-key"))
+	caPublicKeyRaw, err := os.ReadFile(c.String("ca-public-key"))
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +111,7 @@ func parseCaPublicKeys(c *cli.Context) ([]ssh.PublicKey, error) {
 
 func parseHostSigner(c *cli.Context) (ssh.Signer, error) {
 	// parse host private key
-	hostPrivateKeyRaw, err := ioutil.ReadFile(c.String("host-private-key"))
+	hostPrivateKeyRaw, err := os.ReadFile(c.String("host-private-key"))
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func parseHostSigner(c *cli.Context) (ssh.Signer, error) {
 	}
 
 	// parse host certificate
-	hostPublicKeyRaw, err := ioutil.ReadFile(c.String("host-public-key"))
+	hostPublicKeyRaw, err := os.ReadFile(c.String("host-public-key"))
 	if err != nil {
 		return nil, err
 	}

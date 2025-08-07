@@ -28,3 +28,4 @@ _testmain.go
 /data
 /id_rsa*
 /build
+/gatewaysshd

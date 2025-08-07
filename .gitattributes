@@ -1,0 +1,10 @@
+# Exclude vendor directory from language statistics and diffs
+vendor/ linguist-vendored
+vendor/* linguist-vendored
+
+# Mark vendor files as vendored so they don't affect repository language detection
+vendor/**/* linguist-vendored
+
+# Optional: Also exclude from diffs to reduce noise
+vendor/ -diff
+vendor/* -diff
