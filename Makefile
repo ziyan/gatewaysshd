@@ -37,7 +37,7 @@ gatewaysshd: $(shell find . -iname '*.go') generate
 lint:
 	@set -e; \
 	if ! hash golangci-lint >/dev/null 2>&1; then \
-		go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.2; \
+		go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8; \
 	fi; \
 	go mod download; \
 	golangci-lint cache clean; \
