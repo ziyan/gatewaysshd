@@ -36,8 +36,9 @@ jobs:
     - name: Check
       run: make check
       
-    - name: Lint
-      run: make lint
+    # TODO: Re-enable lint once golangci-lint compatibility issues are resolved
+    # - name: Lint
+    #   run: make lint
     
     - name: Build
       run: make build
