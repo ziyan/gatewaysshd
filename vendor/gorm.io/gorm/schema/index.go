@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -12,8 +13,8 @@ type Index struct {
 	Type    string // btree, hash, gist, spgist, gin, and brin
 	Where   string
 	Comment string
-	Option  string // WITH PARSER parser_name
-	Fields  []IndexOption
+	Option  string        // WITH PARSER parser_name
+	Fields  []IndexOption // Note: IndexOption's Field maybe the same
 }
 
 type IndexOption struct {
@@ -22,17 +23,28 @@ type IndexOption struct {
 	Sort       string // DESC, ASC
 	Collate    string
 	Length     int
-	priority   int
+	Priority   int
 }
 
 // ParseIndexes parse schema indexes
-func (schema *Schema) ParseIndexes() map[string]Index {
-	indexes := map[string]Index{}
+func (schema *Schema) ParseIndexes() []*Index {
+	indexesByName := map[string]*Index{}
+	indexes := []*Index{}
 
 	for _, field := range schema.Fields {
 		if field.TagSettings["INDEX"] != "" || field.TagSettings["UNIQUEINDEX"] != "" {
-			for _, index := range parseFieldIndexes(field) {
-				idx := indexes[index.Name]
+			fieldIndexes, err := parseFieldIndexes(field)
+			if err != nil {
+				schema.err = err
+				break
+			}
+			for _, index := range fieldIndexes {
+				idx := indexesByName[index.Name]
+				if idx == nil {
+					idx = &Index{Name: index.Name}
+					indexesByName[index.Name] = idx
+					indexes = append(indexes, idx)
+				}
 				idx.Name = index.Name
 				if idx.Class == "" {
 					idx.Class = index.Class
@@ -52,14 +64,16 @@ func (schema *Schema) ParseIndexes() map[string]Index {
 
 				idx.Fields = append(idx.Fields, index.Fields...)
 				sort.Slice(idx.Fields, func(i, j int) bool {
-					return idx.Fields[i].priority < idx.Fields[j].priority
+					return idx.Fields[i].Priority < idx.Fields[j].Priority
 				})
-
-				indexes[index.Name] = idx
 			}
 		}
 	}
-
+	for _, index := range indexes {
+		if index.Class == "UNIQUE" && len(index.Fields) == 1 {
+			index.Fields[0].Field.UniqueIndex = index.Name
+		}
+	}
 	return indexes
 }
 
@@ -68,12 +82,12 @@ func (schema *Schema) LookIndex(name string) *Index {
 		indexes := schema.ParseIndexes()
 		for _, index := range indexes {
 			if index.Name == name {
-				return &index
+				return index
 			}
 
 			for _, field := range index.Fields {
 				if field.Name == name {
-					return &index
+					return index
 				}
 			}
 		}
@@ -82,30 +96,41 @@ func (schema *Schema) LookIndex(name string) *Index {
 	return nil
 }
 
-func parseFieldIndexes(field *Field) (indexes []Index) {
+func parseFieldIndexes(field *Field) (indexes []Index, err error) {
 	for _, value := range strings.Split(field.Tag.Get("gorm"), ";") {
 		if value != "" {
 			v := strings.Split(value, ":")
 			k := strings.TrimSpace(strings.ToUpper(v[0]))
 			if k == "INDEX" || k == "UNIQUEINDEX" {
 				var (
-					name      string
-					tag       = strings.Join(v[1:], ":")
-					idx       = strings.Index(tag, ",")
-					settings  = ParseTagSetting(tag, ",")
-					length, _ = strconv.Atoi(settings["LENGTH"])
+					name       string
+					tag        = strings.Join(v[1:], ":")
+					idx        = strings.IndexByte(tag, ',')
+					tagSetting = strings.Join(strings.Split(tag, ",")[1:], ",")
+					settings   = ParseTagSetting(tagSetting, ",")
+					length, _  = strconv.Atoi(settings["LENGTH"])
 				)
 
 				if idx == -1 {
 					idx = len(tag)
 				}
 
-				if idx != -1 {
-					name = tag[0:idx]
-				}
-
+				name = tag[0:idx]
 				if name == "" {
-					name = field.Schema.namer.IndexName(field.Schema.Table, field.Name)
+					subName := field.Name
+					const key = "COMPOSITE"
+					if composite, found := settings[key]; found {
+						if len(composite) == 0 || composite == key {
+							err = fmt.Errorf(
+								"the composite tag of %s.%s cannot be empty",
+								field.Schema.Name,
+								field.Name)
+							return
+						}
+						subName = composite
+					}
+					name = field.Schema.namer.IndexName(
+						field.Schema.Table, subName)
 				}
 
 				if (k == "UNIQUEINDEX") || settings["UNIQUE"] != "" {
@@ -130,12 +155,13 @@ func parseFieldIndexes(field *Field) (indexes []Index) {
 						Sort:       settings["SORT"],
 						Collate:    settings["COLLATE"],
 						Length:     length,
-						priority:   priority,
+						Priority:   priority,
 					}},
 				})
 			}
 		}
 	}
 
+	err = nil
 	return
 }

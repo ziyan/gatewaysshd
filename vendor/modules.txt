@@ -1,73 +1,81 @@
-# github.com/cpuguy83/go-md2man/v2 v2.0.0-20190314233015-f79a8a8ca69d
+# github.com/cpuguy83/go-md2man/v2 v2.0.7
+## explicit; go 1.12
 github.com/cpuguy83/go-md2man/v2/md2man
-# github.com/gorilla/mux v1.8.0
-## explicit
+# github.com/gorilla/mux v1.8.1
+## explicit; go 1.20
 github.com/gorilla/mux
-# github.com/jackc/chunkreader/v2 v2.0.1
-github.com/jackc/chunkreader/v2
-# github.com/jackc/pgconn v1.10.1
-github.com/jackc/pgconn
-github.com/jackc/pgconn/internal/ctxwatch
-github.com/jackc/pgconn/stmtcache
-# github.com/jackc/pgio v1.0.0
-github.com/jackc/pgio
 # github.com/jackc/pgpassfile v1.0.0
+## explicit; go 1.12
 github.com/jackc/pgpassfile
-# github.com/jackc/pgproto3/v2 v2.2.0
-github.com/jackc/pgproto3/v2
-# github.com/jackc/pgservicefile v0.0.0-20200714003250-2b9c44734f2b
+# github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761
+## explicit; go 1.14
 github.com/jackc/pgservicefile
-# github.com/jackc/pgtype v1.9.1
-github.com/jackc/pgtype
-# github.com/jackc/pgx/v4 v4.14.1
-github.com/jackc/pgx/v4
-github.com/jackc/pgx/v4/internal/sanitize
-github.com/jackc/pgx/v4/stdlib
+# github.com/jackc/pgx/v5 v5.7.5
+## explicit; go 1.23.0
+github.com/jackc/pgx/v5
+github.com/jackc/pgx/v5/internal/iobufpool
+github.com/jackc/pgx/v5/internal/pgio
+github.com/jackc/pgx/v5/internal/sanitize
+github.com/jackc/pgx/v5/internal/stmtcache
+github.com/jackc/pgx/v5/pgconn
+github.com/jackc/pgx/v5/pgconn/ctxwatch
+github.com/jackc/pgx/v5/pgconn/internal/bgreader
+github.com/jackc/pgx/v5/pgproto3
+github.com/jackc/pgx/v5/pgtype
+github.com/jackc/pgx/v5/pgxpool
+github.com/jackc/pgx/v5/stdlib
+# github.com/jackc/puddle/v2 v2.2.2
+## explicit; go 1.19
+github.com/jackc/puddle/v2
+github.com/jackc/puddle/v2/internal/genstack
 # github.com/jinzhu/inflection v1.0.0
+## explicit
 github.com/jinzhu/inflection
-# github.com/jinzhu/now v1.1.4
+# github.com/jinzhu/now v1.1.5
+## explicit; go 1.12
 github.com/jinzhu/now
 # github.com/op/go-logging v0.0.0-20160315200505-970db520ece7
 ## explicit
 github.com/op/go-logging
-# github.com/oschwald/geoip2-golang v1.4.0
-## explicit
+# github.com/oschwald/geoip2-golang v1.13.0
+## explicit; go 1.21
 github.com/oschwald/geoip2-golang
-# github.com/oschwald/maxminddb-golang v1.6.0
+# github.com/oschwald/maxminddb-golang v1.13.1
+## explicit; go 1.21
 github.com/oschwald/maxminddb-golang
-# github.com/russross/blackfriday/v2 v2.0.1
+# github.com/russross/blackfriday/v2 v2.1.0
+## explicit
 github.com/russross/blackfriday/v2
-# github.com/segmentio/ksuid v1.0.2
-## explicit
+# github.com/segmentio/ksuid v1.0.4
+## explicit; go 1.12
 github.com/segmentio/ksuid
-# github.com/shurcooL/sanitized_anchor_name v1.0.0
-github.com/shurcooL/sanitized_anchor_name
-# github.com/urfave/cli v1.22.4
-## explicit
+# github.com/urfave/cli v1.22.17
+## explicit; go 1.11
 github.com/urfave/cli
-# golang.org/x/crypto v0.0.0-20210921155107-089bfa567519
-## explicit
+# golang.org/x/crypto v0.40.0
+## explicit; go 1.23.0
 golang.org/x/crypto/blowfish
 golang.org/x/crypto/chacha20
 golang.org/x/crypto/curve25519
-golang.org/x/crypto/curve25519/internal/field
-golang.org/x/crypto/ed25519
-golang.org/x/crypto/ed25519/internal/edwards25519
+golang.org/x/crypto/internal/alias
 golang.org/x/crypto/internal/poly1305
-golang.org/x/crypto/internal/subtle
 golang.org/x/crypto/pbkdf2
 golang.org/x/crypto/ssh
 golang.org/x/crypto/ssh/internal/bcrypt_pbkdf
-# golang.org/x/sys v0.0.0-20210615035016-665e8c7367d1
+# golang.org/x/sync v0.16.0
+## explicit; go 1.23.0
+golang.org/x/sync/semaphore
+# golang.org/x/sys v0.35.0
+## explicit; go 1.23.0
 golang.org/x/sys/cpu
-golang.org/x/sys/internal/unsafeheader
 golang.org/x/sys/plan9
 golang.org/x/sys/unix
 golang.org/x/sys/windows
-# golang.org/x/term v0.0.0-20201126162022-7de9c90e9dd1
-## explicit
+# golang.org/x/term v0.33.0
+## explicit; go 1.23.0
 golang.org/x/term
-# golang.org/x/text v0.3.7
+# golang.org/x/text v0.27.0
+## explicit; go 1.23.0
 golang.org/x/text/cases
 golang.org/x/text/internal
 golang.org/x/text/internal/language
@@ -81,14 +89,16 @@ golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
 golang.org/x/text/width
-# gorm.io/driver/postgres v1.3.1
-## explicit
+# gorm.io/driver/postgres v1.6.0
+## explicit; go 1.20
 gorm.io/driver/postgres
-# gorm.io/gorm v1.23.1
-## explicit
+# gorm.io/gorm v1.30.1
+## explicit; go 1.18
 gorm.io/gorm
 gorm.io/gorm/callbacks
 gorm.io/gorm/clause
+gorm.io/gorm/internal/lru
+gorm.io/gorm/internal/stmt_store
 gorm.io/gorm/logger
 gorm.io/gorm/migrator
 gorm.io/gorm/schema

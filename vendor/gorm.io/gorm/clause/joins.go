@@ -1,5 +1,7 @@
 package clause
 
+import "gorm.io/gorm/utils"
+
 type JoinType string
 
 const (
@@ -9,13 +11,43 @@ const (
 	RightJoin JoinType = "RIGHT"
 )
 
-// Join join clause for from
+type JoinTarget struct {
+	Type        JoinType
+	Association string
+	Subquery    Expression
+	Table       string
+}
+
+func Has(name string) JoinTarget {
+	return JoinTarget{Type: InnerJoin, Association: name}
+}
+
+func (jt JoinType) Association(name string) JoinTarget {
+	return JoinTarget{Type: jt, Association: name}
+}
+
+func (jt JoinType) AssociationFrom(name string, subquery Expression) JoinTarget {
+	return JoinTarget{Type: jt, Association: name, Subquery: subquery}
+}
+
+func (jt JoinTarget) As(name string) JoinTarget {
+	jt.Table = name
+	return jt
+}
+
+// Join clause for from
 type Join struct {
 	Type       JoinType
 	Table      Table
 	ON         Where
 	Using      []string
 	Expression Expression
+}
+
+func JoinTable(names ...string) Table {
+	return Table{
+		Name: utils.JoinNestedRelationNames(names),
+	}
 }
 
 func (join Join) Build(builder Builder) {

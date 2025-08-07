@@ -2,6 +2,7 @@ package schema
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"regexp"
 	"strings"
@@ -59,10 +60,18 @@ func removeSettingFromTag(tag reflect.StructTag, names ...string) reflect.Struct
 	return tag
 }
 
+func appendSettingFromTag(tag reflect.StructTag, value string) reflect.StructTag {
+	t := tag.Get("gorm")
+	if strings.Contains(t, value) {
+		return tag
+	}
+	return reflect.StructTag(fmt.Sprintf(`gorm:"%s;%s"`, value, t))
+}
+
 // GetRelationsValues get relations's values from a reflect value
 func GetRelationsValues(ctx context.Context, reflectValue reflect.Value, rels []*Relationship) (reflectResults reflect.Value) {
 	for _, rel := range rels {
-		reflectResults = reflect.MakeSlice(reflect.SliceOf(reflect.PtrTo(rel.FieldSchema.ModelType)), 0, 1)
+		reflectResults = reflect.MakeSlice(reflect.SliceOf(reflect.PointerTo(rel.FieldSchema.ModelType)), 0, 1)
 
 		appendToResults := func(value reflect.Value) {
 			if _, isZero := rel.Field.ValueOf(ctx, value); !isZero {
@@ -106,6 +115,11 @@ func GetIdentityFieldValuesMap(ctx context.Context, reflectValue reflect.Value, 
 		notZero, zero bool
 	)
 
+	if reflectValue.Kind() == reflect.Ptr ||
+		reflectValue.Kind() == reflect.Interface {
+		reflectValue = reflectValue.Elem()
+	}
+
 	switch reflectValue.Kind() {
 	case reflect.Struct:
 		results = [][]interface{}{make([]interface{}, len(fields))}
@@ -124,7 +138,7 @@ func GetIdentityFieldValuesMap(ctx context.Context, reflectValue reflect.Value, 
 		for i := 0; i < reflectValue.Len(); i++ {
 			elem := reflectValue.Index(i)
 			elemKey := elem.Interface()
-			if elem.Kind() != reflect.Ptr {
+			if elem.Kind() != reflect.Ptr && elem.CanAddr() {
 				elemKey = elem.Addr().Interface()
 			}
 
