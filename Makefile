@@ -22,14 +22,14 @@ check:
 # compile
 .PHONY: generate
 generate:
-	@CGO_ENABLED=0 go generate -mod=vendor ./...
+	@CGO_ENABLED=0 go generate -mod=readonly ./...
 
 .PHONY: build
 build: gatewaysshd
 
 gatewaysshd: $(shell find . -iname '*.go') generate
 	mkdir -p ${BUILD_DIR}
-	CGO_ENABLED=0 go build -mod=vendor -o ${BUILD_DIR}/gatewaysshd -ldflags="-X main.Commit=$$(git describe --match=NeVeRmAtCh --always --abbrev=40 --dirty)" .
+	CGO_ENABLED=0 go build -mod=readonly -o ${BUILD_DIR}/gatewaysshd -ldflags="-X main.Commit=$$(git describe --match=NeVeRmAtCh --always --abbrev=40 --dirty)" .
 	objcopy --strip-all ${BUILD_DIR}/gatewaysshd
 
 # run lint
@@ -37,16 +37,16 @@ gatewaysshd: $(shell find . -iname '*.go') generate
 lint:
 	@set -e; \
 	if ! hash golangci-lint >/dev/null 2>&1; then \
-		go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.43.0; \
+		go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.57.2; \
 	fi; \
-	golangci-lint run
+	golangci-lint run --modules-download-mode=readonly
 
 # run tests
 .PHONY: test
 test: generate
 	@set -e; \
 	if ! hash gotestsum >/dev/null 2>&1; then \
-		go install gotest.tools/gotestsum@v1.7.0; \
+		go install gotest.tools/gotestsum@v1.12.0; \
 	fi; \
 	if hash docker >/dev/null 2>&1; then \
 		CONTAINER="$$(docker run \
@@ -64,14 +64,14 @@ test: generate
 		IP="$$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' $${CONTAINER})"; \
 		export GATEWAYSSHD_TEST_DATABASE_HOST="$${IP}"; \
 	fi; \
-	gotestsum --format testname -- -mod=vendor -cover -coverprofile=${BUILD_DIR}/coverage.out ./...; \
+	gotestsum --format testname -- -mod=readonly -cover -coverprofile=${BUILD_DIR}/coverage.out ./...; \
 	go tool cover -html=${BUILD_DIR}/coverage.out -o ${BUILD_DIR}/coverage.html; \
 	go tool cover -func=${BUILD_DIR}/coverage.out
 
 # benchmark tests
 .PHONY: benchmark
 benchmark:
-	@go test -mod=vendor -bench=. ./...
+	@go test -mod=readonly -bench=. ./...
 
 # watch for code change and compile
 .PHONY: watch
