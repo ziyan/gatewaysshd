@@ -1,3 +1,10 @@
+# 0.3.1 (2025-09-18)
+
+## Features
+
+- Drop the support for insecure key exchanges, ciphers, and MACs.
+
+
 # 0.3.0 (2025-08-07)
 
 ## Features

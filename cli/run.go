@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/urfave/cli"
+	"golang.org/x/crypto/ssh"
 
 	"github.com/ziyan/gatewaysshd/auth"
 	"github.com/ziyan/gatewaysshd/db"
@@ -91,6 +92,30 @@ func run(c *cli.Context) error {
 	if err != nil {
 		log.Errorf("failed to create ssh config: %s", err)
 		return err
+	}
+	// remove insecure key exchanges from the default list of key exchanges (ssh.defaultKexAlgos)
+	sshConfig.KeyExchanges = []string{
+		ssh.KeyExchangeCurve25519,
+		ssh.KeyExchangeECDHP256,
+		ssh.KeyExchangeECDHP384,
+		ssh.KeyExchangeECDHP521,
+		ssh.KeyExchangeDH14SHA256,
+	}
+	// remove insecure ciphers from the default list of ciphers (ssh.defaultCiphers)
+	sshConfig.Ciphers = []string{
+		ssh.CipherAES128GCM,
+		ssh.CipherAES256GCM,
+		ssh.CipherAES128CTR,
+		ssh.CipherAES192CTR,
+		ssh.CipherAES256CTR,
+	}
+	// remove insecure MACs from the default list of MACs (ssh.defaultMACs)
+	sshConfig.MACs = []string{
+		ssh.HMACSHA256ETM,
+		ssh.HMACSHA512ETM,
+		ssh.HMACSHA256,
+		ssh.HMACSHA512,
+		ssh.HMACSHA1,
 	}
 	sshConfig.ServerVersion = c.String("server-version")
 	sshConfig.AddHostKey(hostSigner)
