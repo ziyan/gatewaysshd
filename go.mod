@@ -1,6 +1,6 @@
 module github.com/ziyan/gatewaysshd
 
-go 1.23.0
+go 1.24.0
 
 toolchain go1.24.2
 
@@ -10,8 +10,8 @@ require (
 	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/segmentio/ksuid v1.0.4
 	github.com/urfave/cli v1.22.17
-	golang.org/x/crypto v0.40.0
-	golang.org/x/term v0.33.0
+	golang.org/x/crypto v0.45.0
+	golang.org/x/term v0.37.0
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.30.1
 )
@@ -26,7 +26,7 @@ require (
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/oschwald/maxminddb-golang v1.13.1 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
-	golang.org/x/sync v0.16.0 // indirect
-	golang.org/x/sys v0.35.0 // indirect
-	golang.org/x/text v0.27.0 // indirect
+	golang.org/x/sync v0.18.0 // indirect
+	golang.org/x/sys v0.38.0 // indirect
+	golang.org/x/text v0.31.0 // indirect
 )
