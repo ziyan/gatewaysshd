@@ -1,0 +1,174 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+      - "[0-9]+.[0-9]+.[0-9]+*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            extension: ""
+            archive: tar.gz
+          - goos: linux
+            goarch: arm64
+            extension: ""
+            archive: tar.gz
+          - goos: darwin
+            goarch: amd64
+            extension: ""
+            archive: tar.gz
+          - goos: darwin
+            goarch: arm64
+            extension: ""
+            archive: tar.gz
+          - goos: windows
+            goarch: amd64
+            extension: ".exe"
+            archive: zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        shell: bash
+        env:
+          CGO_ENABLED: 0
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          COMMIT="${GITHUB_SHA}"
+          mkdir -p dist
+
+          go build -mod=readonly \
+            -ldflags "-s -w -X main.Version=${VERSION} -X main.Commit=${COMMIT}" \
+            -o "dist/gatewaysshd${{ matrix.extension }}" .
+
+      - name: Package
+        id: package
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          fileBasename="gatewaysshd_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          mkdir -p package
+
+          cp README.md package/
+          if [ -f CHANGELOG.md ]; then
+            cp CHANGELOG.md package/
+          fi
+          if [ -f LICENSE ]; then
+            cp LICENSE package/
+          fi
+
+          cp "dist/gatewaysshd${{ matrix.extension }}" "package/gatewaysshd${{ matrix.extension }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            (
+              cd package
+              zip "../${fileBasename}.zip" *
+            )
+            echo "asset=${fileBasename}.zip" >> "$GITHUB_OUTPUT"
+          else
+            (
+              cd package
+              tar -czf "../${fileBasename}.tar.gz" *
+            )
+            echo "asset=${fileBasename}.tar.gz" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ${{ steps.package.outputs.asset }}
+
+  release:
+    name: Publish release
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS
+        id: checksums
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          checksumFile="gatewaysshd_${VERSION}_SHA256SUMS"
+          (
+            cd release-artifacts
+            sha256sum * > "../${checksumFile}"
+          )
+          echo "checksumFile=${checksumFile}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes from changelog
+        id: releaseNotes
+        shell: bash
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          VERSION="${VERSION#v}"
+          bodyFile="release-notes.md"
+
+          if [ ! -f CHANGELOG.md ]; then
+            printf 'Release %s\n' "$VERSION" > "$bodyFile"
+            echo "bodyFile=$bodyFile" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          sectionStart="## $VERSION"
+          awk -v sectionStart="$sectionStart" '
+            BEGIN {
+              found = 0
+            }
+            index($0, sectionStart) == 1 {
+              found = 1
+            }
+            found {
+              if ($0 ~ /^## / && index($0, sectionStart) != 1) {
+                exit
+              }
+              print
+            }
+          ' CHANGELOG.md > "$bodyFile"
+
+          if [ ! -s "$bodyFile" ]; then
+            printf 'Release %s\n' "$VERSION" > "$bodyFile"
+          fi
+
+          echo "bodyFile=$bodyFile" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-artifacts/*
+            ${{ steps.checksums.outputs.checksumFile }}
+          body_path: ${{ steps.releaseNotes.outputs.bodyFile }}

@@ -1,0 +1,59 @@
+name: Release Bot
+
+# Runs semantic-release on every push to master:
+#   1. commit-analyzer decides the next version from conventional commits
+#      (major bumps are capped to minor; force one via workflow_dispatch).
+#   2. changelog-promote collects the changelog blocks of the merged PRs and
+#      inserts the new "## <version>" section into CHANGELOG.md, and bumps
+#      the fallback version in version.go.
+#   3. @semantic-release/git commits both files as "chore(release): <version>"
+#      and semantic-release pushes the "v<version>" tag.
+# The tag push then triggers the Release workflow which builds and publishes
+# the artifacts.
+#
+# RELEASE_TOKEN must be a personal access token (or GitHub App token) with
+# contents write access: commits/tags pushed with the default GITHUB_TOKEN
+# do not trigger other workflows, so the tag would never be released.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      forceReleaseType:
+        description: "Force the release type (bypasses commit analysis)"
+        type: choice
+        options: ["", "patch", "minor", "major"]
+        default: ""
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    # skip the pipeline triggered by the bot's own chore(release) commit
+    if: github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message, 'chore(release):')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install semantic-release
+        run: npm install --prefix scripts/release --no-audit --no-fund
+
+      - name: Run semantic-release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          FORCE_RELEASE_TYPE: ${{ inputs.forceReleaseType }}
+        run: ./scripts/release/node_modules/.bin/semantic-release
