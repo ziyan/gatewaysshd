@@ -67,7 +67,10 @@ func startTestGateway(t *testing.T) (string, ssh.Signer, gateway.Gateway, db.Dat
 	database, releaseDatabase := dbtest.AcquireDatabase(t)
 
 	caSigner := newTestSigner(t)
-	sshConfig, err := auth.NewConfig(database, []ssh.PublicKey{caSigner.PublicKey()}, "missing-geoip.mmdb")
+	sshConfig, err := auth.NewConfig(database, &auth.Settings{
+		CAPublicKeys:  []ssh.PublicKey{caSigner.PublicKey()},
+		GeoipDatabase: "missing-geoip.mmdb",
+	})
 	if err != nil {
 		t.Fatalf("failed to create ssh config: %s", err)
 	}

@@ -79,7 +79,7 @@ test: generate
 		IP="$$(docker inspect --format '{{ range .NetworkSettings.Networks }}{{ .IPAddress }}{{ end }}' $${CONTAINER})"; \
 		export GATEWAYSSHD_TEST_DATABASE_HOST="$${IP}"; \
 	fi; \
-	gotestsum --format testname -- -mod=readonly -cover -coverprofile=${BUILD_DIR}/coverage.out ./...; \
+	gotestsum --format testname -- -mod=readonly -race -coverpkg=./... -coverprofile=${BUILD_DIR}/coverage.out ./...; \
 	go tool cover -html=${BUILD_DIR}/coverage.out -o ${BUILD_DIR}/coverage.html; \
 	go tool cover -func=${BUILD_DIR}/coverage.out
 

@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"net"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -11,12 +12,37 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/ziyan/gatewaysshd/db"
+	"github.com/ziyan/gatewaysshd/util/deferutil"
 )
 
 var log = logging.MustGetLogger("gateway")
 
 type Settings struct {
+	// version string
 	Version string
+
+	// id of this node, empty disables node registration and mesh tunneling
+	NodeID string
+
+	// address where peer nodes can reach this node, empty means other nodes
+	// cannot dial this node
+	NodeAddress string
+
+	// host public key of this node, published to the node table so dialing
+	// peers can pin it
+	HostPublicKey ssh.PublicKey
+
+	// certificate signer used to authenticate to other nodes, a user
+	// certificate signed by the peer certificate authority with the "peer"
+	// principal and the node id as key id, nil disables outbound peering
+	NodeSigner ssh.Signer
+
+	// address of the local postgres database bridged for peer nodes, empty
+	// refuses postgres tunnels
+	PostgresAddress string
+
+	// how often to look for new peer nodes, defaults to 15 seconds
+	PeerDiscoveryInterval time.Duration
 }
 
 // an instance of gateway, contains runtime states
@@ -24,6 +50,8 @@ type Gateway interface {
 	Close()
 
 	HandleConnection(net.Conn)
+	HandleSocksConnection(net.Conn)
+	HTTPProxyHandler() http.Handler
 	ScavengeConnections(time.Duration)
 
 	ListUsers(context.Context) (interface{}, error)
@@ -38,23 +66,61 @@ type gateway struct {
 	connectionsIndex map[string][]*connection
 	connectionsList  []*connection
 	lock             sync.Mutex
+
+	// map from peer node id to outbound peer, protected by peersLock
+	peers     map[string]*peer
+	peersLock sync.Mutex
+
+	// lifetime management for background loops
+	done      chan struct{}
+	closeOnce sync.Once
+	waitGroup sync.WaitGroup
 }
 
 // creates a new instance of gateway
 func Open(database db.Database, sshConfig *ssh.ServerConfig, settings *Settings) (Gateway, error) {
-	return &gateway{
+	self := &gateway{
 		database:         database,
 		sshConfig:        sshConfig,
 		settings:         settings,
 		connectionsIndex: make(map[string][]*connection),
 		connectionsList:  make([]*connection, 0),
-	}, nil
+		peers:            make(map[string]*peer),
+		done:             make(chan struct{}),
+	}
+	if settings.NodeID != "" {
+		if err := self.registerNode(context.Background(), true, true); err != nil {
+			return nil, err
+		}
+		self.waitGroup.Add(1)
+		go func() {
+			defer deferutil.Recover()
+			defer self.waitGroup.Done()
+			self.runPeers(context.Background())
+		}()
+	}
+	return self, nil
 }
 
 // close the gateway instance
 func (self *gateway) Close() {
+	self.closeOnce.Do(func() {
+		close(self.done)
+	})
+
 	for _, connection := range self.listConnections() {
 		connection.close()
+	}
+
+	for _, peer := range self.listPeers() {
+		peer.close()
+	}
+
+	self.waitGroup.Wait()
+
+	// mark this node as offline in the database
+	if err := self.registerNode(context.Background(), false, false); err != nil {
+		log.Warningf("failed to mark node as offline: %s", err)
 	}
 }
 
@@ -140,6 +206,72 @@ func (self *gateway) lookupConnectionService(host string, port uint16) (*connect
 
 	log.Debugf("lookup: failed to find service: host = %s, port = %d", host, port)
 	return nil, "", 0
+}
+
+// lookupRemotePeer finds the peer of the node the target user last connected
+// to, so the tunnel can be forwarded across the mesh. The host is split the
+// same way as lookupConnectionService to find the user name candidates.
+func (self *gateway) lookupRemotePeer(ctx context.Context, host string) *peer {
+	if self.settings.NodeID == "" {
+		return nil // mesh disabled
+	}
+	parts := strings.Split(host, ".")
+	for index := range parts {
+		user := strings.Join(parts[index:], ".")
+		if user == "" {
+			continue
+		}
+		model, err := self.database.GetUser(ctx, user)
+		if err != nil {
+			// a transient error on one candidate must not abort resolving the
+			// remaining, more-specific user suffixes
+			log.Warningf("failed to look up user %q for mesh tunneling: %s", user, err)
+			continue
+		}
+		if model == nil || model.NodeID == "" || model.NodeID == self.settings.NodeID {
+			continue
+		}
+		if peer := self.getPeer(model.NodeID); peer != nil {
+			log.Debugf("lookup: found remote node for host %q: node = %s", host, model.NodeID)
+			return peer
+		}
+		log.Debugf("lookup: user %q is on node %s but no peer connection is available", user, model.NodeID)
+	}
+	return nil
+}
+
+// openServiceTunnel opens a tunnel to the exposed service host:port on behalf
+// of an external proxy client (socks/http). It mirrors the routing in
+// connection.handleTunnelChannel: a locally-connected service first, otherwise
+// a service on a peer node. originAddress/originPort describe the proxy client.
+func (self *gateway) openServiceTunnel(host string, port uint16, originAddress string, originPort uint32) (*tunnel, error) {
+	metadata := map[string]interface{}{
+		"origin": originAddress,
+		"service": map[string]interface{}{
+			"host": host,
+			"port": port,
+		},
+	}
+	if otherConnection, serviceHost, servicePort := self.lookupConnectionService(host, port); otherConnection != nil {
+		return otherConnection.openTunnel("forwarded-tcpip", marshalTunnelData(&tunnelData{
+			Host:          serviceHost,
+			Port:          uint32(servicePort),
+			OriginAddress: originAddress,
+			OriginPort:    originPort,
+		}), metadata)
+	}
+	lookupContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	remotePeer := self.lookupRemotePeer(lookupContext, host)
+	cancel()
+	if remotePeer != nil {
+		return remotePeer.openTunnel("direct-tcpip", marshalTunnelData(&tunnelData{
+			Host:          host,
+			Port:          uint32(port),
+			OriginAddress: originAddress,
+			OriginPort:    originPort,
+		}), metadata)
+	}
+	return nil, ErrServiceNotFound
 }
 
 // returns a list of connections

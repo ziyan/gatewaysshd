@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -37,11 +38,15 @@ type connection struct {
 	tunnelsClosed        uint64
 	services             map[string]map[uint16]bool
 	done                 chan struct{}
+	closeOnce            sync.Once
 	lock                 sync.Mutex
 	waitGroup            sync.WaitGroup
 	usage                *usageStats
 	permitPortForwarding bool
 	administrator        bool
+
+	// set when this is an inbound connection from a peer node
+	nodeId string
 }
 
 func handleConnection(gateway *gateway, conn *ssh.ServerConn, channels <-chan ssh.NewChannel, requests <-chan *ssh.Request, usage *usageStats) {
@@ -55,11 +60,20 @@ func handleConnection(gateway *gateway, conn *ssh.ServerConn, channels <-chan ss
 		administrator = true
 	}
 
+	// inbound connections from peer nodes carry the node identity
+	nodeId := ""
+	user := conn.User()
+	if _, ok := conn.Permissions.Extensions["peer"]; ok {
+		nodeId = conn.Permissions.Extensions["identity"]
+		user = ""
+	}
+
 	self := &connection{
 		id:                   ksuid.New().String(),
 		gateway:              gateway,
 		conn:                 conn,
-		user:                 conn.User(),
+		user:                 user,
+		nodeId:               nodeId,
 		remoteAddress:        conn.RemoteAddr(),
 		localAddress:         conn.LocalAddr(),
 		services:             make(map[string]map[uint16]bool),
@@ -69,10 +83,13 @@ func handleConnection(gateway *gateway, conn *ssh.ServerConn, channels <-chan ss
 		done:                 make(chan struct{}),
 	}
 	log.Infof("%s: new connection", self)
+
+	// take the waitGroup token before publishing the connection to the gateway,
+	// so a concurrent Close()/waitGroup.Wait() cannot race this Add
+	self.waitGroup.Add(1)
 	self.gateway.addConnection(self)
 
 	// handle requests and channels on this connection
-	self.waitGroup.Add(1)
 	go func() {
 		defer deferutil.Recover()
 		defer self.waitGroup.Done()
@@ -110,13 +127,19 @@ func handleConnection(gateway *gateway, conn *ssh.ServerConn, channels <-chan ss
 }
 
 func (self *connection) String() string {
+	if self.nodeId != "" {
+		return fmt.Sprintf("connection(id=%q, remote=%q, nodeId=%q)", self.id, self.remoteAddress, self.nodeId)
+	}
 	return fmt.Sprintf("connection(id=%q, remote=%q, user=%q)", self.id, self.remoteAddress, self.user)
 }
 
-// close the ssh connection
+// close the ssh connection. safe to call from multiple goroutines
+// (shutdown, scavenger, kickUser) concurrently.
 func (self *connection) close() {
 	defer self.waitGroup.Wait()
-	close(self.done)
+	self.closeOnce.Do(func() {
+		close(self.done)
+	})
 	log.Debugf("%s: connection closed", self)
 }
 
@@ -155,10 +178,7 @@ func (self *connection) deleteTunnel(closedTunnel *tunnel) {
 
 // returns the last used time of the connection
 func (self *connection) getUsedAt() time.Time {
-	self.lock.Lock()
-	defer self.lock.Unlock()
-
-	return self.usage.usedAt
+	return self.usage.getUsedAt()
 }
 
 // returns the list of services this connection advertises
@@ -255,11 +275,11 @@ func (self *connection) gatherStatus() *connectionStatus {
 		TunnelsOpened:        self.tunnelsOpened,
 		TunnelsClosed:        self.tunnelsClosed,
 		CreatedAt:            self.usage.createdAt,
-		UsedAt:               self.usage.usedAt,
+		UsedAt:               self.usage.getUsedAt(),
 		UpTime:               uint64(time.Since(self.usage.createdAt).Seconds()),
-		IdleTime:             uint64(time.Since(self.usage.usedAt).Seconds()),
-		BytesRead:            self.usage.bytesRead,
-		BytesWritten:         self.usage.bytesWritten,
+		IdleTime:             uint64(time.Since(self.usage.getUsedAt()).Seconds()),
+		BytesRead:            self.usage.getBytesRead(),
+		BytesWritten:         self.usage.getBytesWritten(),
 		Services:             services,
 	}
 }
@@ -365,7 +385,14 @@ func (self *connection) handleChannel(newChannel ssh.NewChannel) error {
 
 	switch newChannel.ChannelType() {
 	case "session":
-		ok, rejection, message, err = self.handleSessionChannel(newChannel)
+		// peer connections have no user and must not reach the session
+		// handlers, which would otherwise write an empty-named user row.
+		// leave err nil so it takes the leak-free reject path below.
+		if self.nodeId != "" {
+			ok, rejection, message, err = false, ssh.Prohibited, "sessions not allowed on peer connections", nil
+		} else {
+			ok, rejection, message, err = self.handleSessionChannel(newChannel)
+		}
 	case "direct-tcpip":
 		ok, rejection, message, err = self.handleTunnelChannel(newChannel)
 	}
@@ -428,8 +455,15 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 		return false, ssh.UnknownChannelType, "failed to decode extra data", err
 	}
 
-	// see if this connection is allowed
-	if !self.permitPortForwarding {
+	// peer nodes may tunnel to the local postgres database; gate on the peer
+	// connection so a regular user's service named "postgres" is not shadowed
+	if self.nodeId != "" && data.Host == "postgres" && data.Port == 5432 {
+		return self.handlePostgresChannel(newChannel)
+	}
+
+	// see if this connection is allowed, peer nodes already checked on the
+	// originating node
+	if !self.permitPortForwarding && self.nodeId == "" {
 		log.Errorf("%s: no permission to port forward", self)
 		return false, ssh.Prohibited, "permission denied", ErrPermissionDenied
 	}
@@ -440,7 +474,17 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 	}
 	portU16 := uint16(data.Port) // #nosec G115 - safe: checked above for range
 	otherConnection, host, port := self.gateway.lookupConnectionService(data.Host, portU16)
-	if otherConnection == nil {
+
+	// not found locally, see if the target user is connected to another node
+	// in the mesh, requests that arrived from a peer are never forwarded
+	// again to prevent loops
+	var remotePeer *peer
+	if otherConnection == nil && self.nodeId == "" {
+		lookupContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		remotePeer = self.gateway.lookupRemotePeer(lookupContext, data.Host)
+		cancel()
+	}
+	if otherConnection == nil && remotePeer == nil {
 		return false, ssh.ConnectionFailed, "service not found or not online", nil
 	}
 
@@ -456,13 +500,38 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 		defer deferutil.Recover()
 		defer self.waitGroup.Done()
 
+		// pick the target: a remote peer (forward the original request to the
+		// node the user is on) or a local connection (resolved host/port)
+		var target tunnelOpener
+		var targetChannelType string
+		var targetData []byte
+		var toMetadata map[string]interface{}
+		if remotePeer != nil {
+			target = remotePeer
+			targetChannelType = "direct-tcpip"
+			targetData = marshalTunnelData(data)
+			toMetadata = map[string]interface{}{
+				"nodeId": remotePeer.nodeId,
+			}
+		} else {
+			target = otherConnection
+			targetChannelType = "forwarded-tcpip"
+			targetData = marshalTunnelData(&tunnelData{
+				Host:          host,
+				Port:          uint32(port),
+				OriginAddress: data.OriginAddress,
+				OriginPort:    data.OriginPort,
+			})
+			toMetadata = map[string]interface{}{
+				"user":    otherConnection.user,
+				"address": otherConnection.remoteAddress.String(),
+			}
+		}
+
 		// first need to track the opened channel
 		thisTunnel := newTunnel(self, channel, newChannel.ChannelType(), newChannel.ExtraData(), map[string]interface{}{
 			"origin": data.OriginAddress,
-			"to": map[string]interface{}{
-				"user":    otherConnection.user,
-				"address": otherConnection.remoteAddress.String(),
-			},
+			"to":     toMetadata,
 			"service": map[string]interface{}{
 				"host": data.Host,
 				"port": data.Port,
@@ -477,12 +546,7 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 		defer thisTunnel.close()
 
 		// attempt to open a channel, this can block
-		otherTunnel, err := otherConnection.openTunnel("forwarded-tcpip", marshalTunnelData(&tunnelData{
-			Host:          host,
-			Port:          uint32(port),
-			OriginAddress: data.OriginAddress,
-			OriginPort:    data.OriginPort,
-		}), map[string]interface{}{
+		otherTunnel, err := target.openTunnel(targetChannelType, targetData, map[string]interface{}{
 			"origin": data.OriginAddress,
 			"from": map[string]interface{}{
 				"address": self.remoteAddress.String(),
@@ -494,7 +558,7 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 			},
 		})
 		if err != nil {
-			log.Warningf("%s: failed to open tunnel to %s: %s", self, otherConnection, err)
+			log.Warningf("%s: failed to open tunnel to %s via %s: %s", self, data.Host, target, err)
 			return
 		}
 		defer otherTunnel.close()
@@ -522,4 +586,79 @@ func (self *connection) openTunnel(channelType string, extraData []byte, metadat
 		tunnel.handleRequests(requests)
 	}()
 	return tunnel, nil
+}
+
+// handlePostgresChannel bridges a peer node to the local postgres database,
+// so nodes without direct database access can share the central database
+// through this node's ssh service port.
+func (self *connection) handlePostgresChannel(newChannel ssh.NewChannel) (bool, ssh.RejectionReason, string, error) {
+	// only peer nodes can access postgres
+	if self.nodeId == "" {
+		log.Warningf("%s: non-peer connection attempted to access postgres", self)
+		return false, ssh.Prohibited, "permission denied", ErrPermissionDenied
+	}
+	postgresAddress := self.gateway.settings.PostgresAddress
+	if postgresAddress == "" {
+		log.Warningf("%s: peer requested postgres but no postgres address is configured", self)
+		return false, ssh.Prohibited, "permission denied", ErrPermissionDenied
+	}
+
+	log.Infof("%s: peer node opening postgres tunnel to %s", self, postgresAddress)
+
+	channel, requests, err := newChannel.Accept()
+	if err != nil {
+		log.Errorf("%s: failed to accept postgres channel: %s", self, err)
+		return true, 0, "", err
+	}
+
+	self.waitGroup.Add(1)
+	go func() {
+		defer deferutil.Recover()
+		defer self.waitGroup.Done()
+		ssh.DiscardRequests(requests)
+	}()
+
+	self.waitGroup.Add(1)
+	go func() {
+		defer deferutil.Recover()
+		defer self.waitGroup.Done()
+
+		defer func() {
+			if err := channel.Close(); err != nil {
+				log.Warningf("%s: failed to close postgres channel: %s", self, err)
+			}
+		}()
+
+		conn, err := net.DialTimeout("tcp", postgresAddress, 10*time.Second)
+		if err != nil {
+			log.Errorf("%s: failed to connect to postgres at %s: %s", self, postgresAddress, err)
+			return
+		}
+		defer func() {
+			if err := conn.Close(); err != nil {
+				log.Warningf("%s: failed to close postgres connection: %s", self, err)
+			}
+		}()
+
+		done1 := make(chan struct{})
+		go func() {
+			defer deferutil.Recover()
+			defer close(done1)
+			_, _ = io.Copy(channel, conn)
+		}()
+
+		done2 := make(chan struct{})
+		go func() {
+			defer deferutil.Recover()
+			defer close(done2)
+			_, _ = io.Copy(conn, channel)
+		}()
+
+		select {
+		case <-done1:
+		case <-done2:
+		}
+	}()
+
+	return true, 0, "", nil
 }

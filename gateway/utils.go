@@ -88,17 +88,22 @@ func marshalTunnelData(data *tunnelData) []byte {
 // 	return request, nil
 // }
 
+// usageStats is written concurrently by a connection's ssh read and write
+// loops and read by gatherStatus/getUsedAt, so every mutable field is accessed
+// atomically. The 64-bit atomic fields are declared first for alignment on
+// 32-bit platforms. createdAt is immutable after construction.
 type usageStats struct {
 	bytesRead    uint64
 	bytesWritten uint64
+	usedAtNano   int64
 	createdAt    time.Time
-	usedAt       time.Time
 }
 
 func newUsage() *usageStats {
+	now := time.Now()
 	return &usageStats{
-		createdAt: time.Now(),
-		usedAt:    time.Now(),
+		createdAt:  now,
+		usedAtNano: now.UnixNano(),
 	}
 }
 
@@ -110,10 +115,6 @@ func (self *usageStats) write(bytesWritten uint64) {
 	self.update(0, bytesWritten)
 }
 
-// func (self *usageStats) use() {
-// 	self.update(0, 0)
-// }
-
 func (self *usageStats) update(bytesRead, bytesWritten uint64) {
 	if bytesRead > 0 {
 		atomic.AddUint64(&self.bytesRead, bytesRead)
@@ -121,7 +122,19 @@ func (self *usageStats) update(bytesRead, bytesWritten uint64) {
 	if bytesWritten > 0 {
 		atomic.AddUint64(&self.bytesWritten, bytesWritten)
 	}
-	self.usedAt = time.Now()
+	atomic.StoreInt64(&self.usedAtNano, time.Now().UnixNano())
+}
+
+func (self *usageStats) getBytesRead() uint64 {
+	return atomic.LoadUint64(&self.bytesRead)
+}
+
+func (self *usageStats) getBytesWritten() uint64 {
+	return atomic.LoadUint64(&self.bytesWritten)
+}
+
+func (self *usageStats) getUsedAt() time.Time {
+	return time.Unix(0, atomic.LoadInt64(&self.usedAtNano))
 }
 
 type wrappedConn struct {

@@ -20,11 +20,31 @@ var (
 	ErrInvalidCredentials = errors.New("auth: invalid credentials")
 )
 
-func NewConfig(database db.Database, caPublicKeys []ssh.PublicKey, geoipDatabase string) (*ssh.ServerConfig, error) {
+// PeerUser is the reserved username peer nodes authenticate with. Certificates
+// presented for this user are checked against the peer certificate authorities
+// instead of the user-facing ones, so inter-node trust can be layered on top of
+// existing deployments without touching their user certificate authority.
+const PeerUser = "peer"
+
+type Settings struct {
+	// certificate authorities trusted for regular user certificates
+	CAPublicKeys []ssh.PublicKey
+
+	// certificate authorities trusted for peer node certificates, empty
+	// disables inbound peer connections
+	PeerCAPublicKeys []ssh.PublicKey
+
+	// id of this node, recorded on users at auth time for mesh tunneling
+	NodeID string
+
+	// path to the geoip database file
+	GeoipDatabase string
+}
+
+func NewConfig(database db.Database, settings *Settings) (*ssh.ServerConfig, error) {
 	authenticator := &authenticator{
-		database:      database,
-		caPublicKeys:  caPublicKeys,
-		geoipDatabase: geoipDatabase,
+		database: database,
+		settings: settings,
 	}
 	config := &ssh.ServerConfig{
 		PublicKeyCallback: authenticator.authenticate,
@@ -34,12 +54,16 @@ func NewConfig(database db.Database, caPublicKeys []ssh.PublicKey, geoipDatabase
 }
 
 type authenticator struct {
-	database      db.Database
-	caPublicKeys  []ssh.PublicKey
-	geoipDatabase string
+	database db.Database
+	settings *Settings
 }
 
 func (self *authenticator) authenticate(meta ssh.ConnMetadata, publicKey ssh.PublicKey) (*ssh.Permissions, error) {
+	// peer nodes use a reserved username and a separate certificate authority
+	if meta.User() == PeerUser {
+		return self.authenticatePeer(meta, publicKey)
+	}
+
 	// lookup location
 	ip := meta.RemoteAddr().(*net.TCPAddr).AddrPort().Addr()
 	location := self.lookupLocation(ip)
@@ -47,7 +71,7 @@ func (self *authenticator) authenticate(meta ssh.ConnMetadata, publicKey ssh.Pub
 	// check certificate
 	certificateChecker := &ssh.CertChecker{
 		IsUserAuthority: func(publicKey ssh.PublicKey) bool {
-			for _, caPublicKey := range self.caPublicKeys {
+			for _, caPublicKey := range self.settings.CAPublicKeys {
 				if bytes.Equal(caPublicKey.Marshal(), publicKey.Marshal()) {
 					return true
 				}
@@ -63,10 +87,17 @@ func (self *authenticator) authenticate(meta ssh.ConnMetadata, publicKey ssh.Pub
 		return nil, err
 	}
 
+	// peer status must come only from authenticatePeer, never from a user
+	// certificate extension: the user certificate authority must not be able
+	// to grant node/peer capabilities.
+	delete(permissions.Extensions, "peer")
+	delete(permissions.Extensions, "identity")
+
 	// update user in database
 	user, err := self.database.PutUser(context.Background(), meta.User(), func(model *db.User) error {
 		model.IP = ip.String()
 		model.Location = location
+		model.NodeID = self.settings.NodeID
 		return nil
 	})
 	if err != nil {
@@ -87,9 +118,48 @@ func (self *authenticator) authenticate(meta ssh.ConnMetadata, publicKey ssh.Pub
 	return permissions, nil
 }
 
+// authenticatePeer validates a peer node certificate against the peer
+// certificate authorities. The certificate must carry the "peer" principal and
+// its key id identifies the node. Permissions are built fresh so certificate
+// extensions never grant user-level capabilities.
+func (self *authenticator) authenticatePeer(meta ssh.ConnMetadata, publicKey ssh.PublicKey) (*ssh.Permissions, error) {
+	if len(self.settings.PeerCAPublicKeys) == 0 {
+		log.Warningf("rejected peer connection from %s: no peer certificate authority configured", meta.RemoteAddr())
+		return nil, ErrInvalidCredentials
+	}
+
+	certificateChecker := &ssh.CertChecker{
+		IsUserAuthority: func(publicKey ssh.PublicKey) bool {
+			for _, caPublicKey := range self.settings.PeerCAPublicKeys {
+				if bytes.Equal(caPublicKey.Marshal(), publicKey.Marshal()) {
+					return true
+				}
+			}
+			log.Warningf("unknown peer authority: %v", publicKey)
+			return false
+		},
+	}
+	if _, err := certificateChecker.Authenticate(meta, publicKey); err != nil {
+		return nil, err
+	}
+
+	certificate, ok := publicKey.(*ssh.Certificate)
+	if !ok || certificate.KeyId == "" {
+		return nil, ErrInvalidCredentials
+	}
+
+	log.Infof("successful peer authentication, node = %s, remote = %s", certificate.KeyId, meta.RemoteAddr())
+	return &ssh.Permissions{
+		Extensions: map[string]string{
+			"peer":     "",
+			"identity": certificate.KeyId,
+		},
+	}, nil
+}
+
 func (self *authenticator) lookupLocation(ip netip.Addr) db.Location {
 	var location db.Location
-	reader, err := geoip2.Open(self.geoipDatabase)
+	reader, err := geoip2.Open(self.settings.GeoipDatabase)
 	if err != nil {
 		return location
 	}

@@ -1,6 +1,7 @@
 # gatewaysshd
 
 [![CI](https://github.com/ziyan/gatewaysshd/actions/workflows/ci.yml/badge.svg)](https://github.com/ziyan/gatewaysshd/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/ziyan/gatewaysshd/branch/master/graph/badge.svg)](https://codecov.io/gh/ziyan/gatewaysshd)
 [![Release](https://img.shields.io/github/v/release/ziyan/gatewaysshd)](https://github.com/ziyan/gatewaysshd/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -50,8 +51,17 @@ users, their reported status, and their geolocation in postgres.
   screenshots that are stored per user and served over the HTTP API.
 - **HTTP API** — `/api/user`, `/api/user/{id}`, `/api/user/{id}/screenshot`
   for dashboards and monitoring.
+- **SOCKS5 and HTTP proxies** (optional) — expose a SOCKS5 or HTTP
+  forward-proxy port so any client can reach exposed services by name
+  (`service.username`), the same reachability as an `ssh -D` dynamic
+  forward. Disabled by default; see the security note below.
 - **GeoIP** — optionally resolves each user's location from a MaxMind
   database.
+- **Mesh peering** — multiple gateway instances share one postgres database
+  and form a mesh, so a user on one node can tunnel to a user on another
+  node over the same SSH service port. Inter-node trust uses a separate peer
+  certificate authority layered on top of each node's existing user CA, so
+  existing single-node deployments keep their user-facing CA unchanged.
 - **Hardened crypto defaults** — insecure key exchanges, ciphers, and MACs
   are disabled out of the box.
 
@@ -127,6 +137,72 @@ gatewaysshd> exit
 `status`, `listUsers`, and `getUser` require the `permit-port-forwarding`
 certificate extension; `kickUser` additionally requires the user to be marked
 as an administrator in the database.
+
+## SOCKS5 and HTTP proxies
+
+Optionally, the gateway can expose forward proxies so clients that are not
+SSH tunnels can still reach exposed services by name. This is the equivalent
+of `ssh -D`: the proxy resolves `service.username` (locally or across the
+mesh) and bridges to it.
+
+```
+$ gatewaysshd \
+    ... \
+    --listen-socks 127.0.0.1:1080 \
+    --listen-http-proxy 127.0.0.1:8080
+```
+
+Then, for a service `web` exposed by user `alice`:
+
+```
+$ curl --socks5-hostname 127.0.0.1:1080 http://web.alice/
+$ curl --proxy http://127.0.0.1:8080 http://web.alice/
+```
+
+The HTTP proxy supports both `CONNECT` (tunneling arbitrary TCP) and
+absolute-form requests (plain HTTP forwarding).
+
+> **Security:** both proxies are **unauthenticated** — anyone who can reach
+> the proxy port can reach any exposed service, bypassing SSH certificate
+> auth. They are disabled by default; only enable them bound to a trusted
+> network (e.g. `127.0.0.1` or a private interface).
+
+## Mesh peering
+
+Several gateway instances can share a single postgres database and form a
+mesh. When a user connects to any node, the node it landed on is recorded on
+the user record. When another user asks to tunnel to `service.username`, the
+node resolves which node that user is on and forwards the tunnel to that node
+over an outbound peer connection — reusing the same SSH service port, no
+extra listener.
+
+Inter-node trust is a **separate peer certificate authority**, layered on top
+of each node's existing user CA. Peer nodes authenticate as the reserved user
+`peer` with a certificate signed by the peer CA (key id = node id); those
+certificates are checked only against `--peer-ca-public-key` and never grant
+user capabilities. Existing single-node deployments keep their user CA, host
+key, and service port unchanged — mesh is enabled purely by adding node
+flags:
+
+```
+$ gatewaysshd \
+    ... \
+    --node-id node-us \
+    --node-address gateway-us.example.com:2020 \
+    --node-certificate id_rsa.node-us-cert.pub \
+    --peer-ca-public-key id_rsa.peer-ca.pub
+```
+
+Nodes without direct database access can reach the central postgres through a
+peer node's SSH service port instead of a separate connection:
+
+```
+$ gatewaysshd \
+    ... \
+    --postgres-peer gateway-us.example.com:2020 \
+    --postgres-peer-host-public-key gateway-us.pub \
+    --node-certificate id_rsa.node-jp-cert.pub
+```
 
 ## Development
 

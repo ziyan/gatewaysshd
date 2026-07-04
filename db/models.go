@@ -86,6 +86,9 @@ type User struct {
 	// whether the user account has been disabled
 	Disabled bool `json:"disabled,omitempty"`
 
+	// the node the user last connected to, used for mesh tunneling
+	NodeID string `json:"nodeId,omitempty"`
+
 	// whether the user is online, not saved in database
 	Online bool `json:"online,omitempty" gorm:"-"`
 
@@ -95,4 +98,30 @@ type User struct {
 
 func (self *User) TableName() string {
 	return "user"
+}
+
+// represents a gateway node participating in the mesh
+type Node struct {
+	ID string `json:"id,omitempty" gorm:"primary_key:true"`
+
+	// meta data
+	CreatedAt  time.Time `json:"createdAt,omitempty"`
+	ModifiedAt time.Time `json:"modifiedAt,omitempty"`
+
+	// address where peer nodes can reach this node
+	Address string `json:"address,omitempty"`
+
+	// host public key of this node in authorized key format, pinned by
+	// dialing peers to verify the remote host
+	HostPublicKey string `json:"hostPublicKey,omitempty"`
+
+	// whether the node is online
+	Online bool `json:"online,omitempty"`
+
+	// when the online status last changed
+	OnlineAt time.Time `json:"onlineAt,omitempty"`
+}
+
+func (self *Node) TableName() string {
+	return "node"
 }
