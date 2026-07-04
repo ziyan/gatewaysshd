@@ -56,4 +56,11 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           FORCE_RELEASE_TYPE: ${{ inputs.forceReleaseType }}
-        run: ./scripts/release/node_modules/.bin/semantic-release
+        # without a baseline tag semantic-release would start at 1.0.0;
+        # the first release must be tagged manually (git push origin vX.Y.Z)
+        run: |
+          if [ -z "$(git tag -l 'v*')" ]; then
+            echo "no v* baseline tag found, skipping; push one manually to seed the version"
+            exit 0
+          fi
+          ./scripts/release/node_modules/.bin/semantic-release
