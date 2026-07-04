@@ -1,7 +1,5 @@
-FROM busybox
+FROM gcr.io/distroless/static-debian13:nonroot
 
-ADD gatewaysshd /bin/gatewaysshd
-
-USER nobody
+COPY gatewaysshd /bin/gatewaysshd
 
 ENTRYPOINT ["/bin/gatewaysshd"]
