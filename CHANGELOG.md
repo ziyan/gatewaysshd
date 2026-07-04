@@ -7,6 +7,36 @@ requests.
 
 <!-- changelog:insert-here -->
 
+
+## 0.5.0 (2026-07-04)
+
+### Added
+
+- Mesh peering: gateway nodes sharing one postgres database can tunnel a user on one node to a user's service on another node over the existing SSH service port (#6)
+- Separate peer certificate authority (`--peer-ca-public-key`, `--node-certificate`, `--node-id`, `--node-address`) for inter-node trust, layered on top of the user CA (#6)
+- Reach the central postgres through a peer node's SSH service port (`--postgres-peer`, `--postgres-peer-host-public-key`) (#6)
+- Configurable postgres sslmode (`--postgres-sslmode`) (#6)
+
+### Changed
+
+- `db.Open` now takes a `db.Settings` struct; `auth.NewConfig` now takes an `auth.Settings` struct (#6)
+
+<details>
+<summary>Commit summary (auto-generated)</summary>
+
+### Bug Fixes
+
+* **gateway:** address code review findings for mesh peering ([19ae754](https://github.com/ziyan/gatewaysshd/commit/19ae7547183585fbe067b3ee8a8116d7b91bf263))
+* **gateway:** second review round — data races, lifecycle, naming ([2bb20c0](https://github.com/ziyan/gatewaysshd/commit/2bb20c067e9da91e994af3d540945b543411b59c))
+
+
+### Features
+
+* **gateway:** mesh peering across nodes sharing a central database ([a8e882e](https://github.com/ziyan/gatewaysshd/commit/a8e882e094642ad04a4511dbb98ba8d3426e604d))
+* **gateway:** optional socks5 and http forward proxies ([3314ad3](https://github.com/ziyan/gatewaysshd/commit/3314ad38c79e78b2112f2da57b56c41b4a878bc8))
+
+</details>
+
 ## 0.4.0 (2026-07-03)
 
 ### Features
