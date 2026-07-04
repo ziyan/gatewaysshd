@@ -2,7 +2,11 @@ package migrations
 
 import (
 	"sort"
+
+	logging "github.com/op/go-logging"
 )
+
+var log = logging.MustGetLogger("migrations") //nolint:unused
 
 var migrations = make(map[string]string)
 

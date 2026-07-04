@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"errors"
 	"net"
+	"net/netip"
 
 	logging "github.com/op/go-logging"
-	geoip2 "github.com/oschwald/geoip2-golang"
+	geoip2 "github.com/oschwald/geoip2-golang/v2"
 	"golang.org/x/crypto/ssh"
 
 	"github.com/ziyan/gatewaysshd/db"
@@ -39,7 +40,7 @@ type authenticator struct {
 
 func (self *authenticator) authenticate(meta ssh.ConnMetadata, publicKey ssh.PublicKey) (*ssh.Permissions, error) {
 	// lookup location
-	ip := meta.RemoteAddr().(*net.TCPAddr).IP
+	ip := meta.RemoteAddr().(*net.TCPAddr).AddrPort().Addr()
 	location := self.lookupLocation(ip)
 
 	// check certificate
@@ -85,28 +86,32 @@ func (self *authenticator) authenticate(meta ssh.ConnMetadata, publicKey ssh.Pub
 	return permissions, nil
 }
 
-func (self *authenticator) lookupLocation(ip net.IP) db.Location {
+func (self *authenticator) lookupLocation(ip netip.Addr) db.Location {
 	var location db.Location
-	d, err := geoip2.Open(self.geoipDatabase)
+	reader, err := geoip2.Open(self.geoipDatabase)
 	if err != nil {
 		return location
 	}
 	defer func() {
-		if err := d.Close(); err != nil {
+		if err := reader.Close(); err != nil {
 			log.Warningf("failed to close geoip database: %v", err)
 		}
 	}()
 
-	r, err := d.City(ip)
+	record, err := reader.City(ip)
 	if err != nil {
 		return location
 	}
 
-	location.Country = r.Country.IsoCode
-	location.Latitude = r.Location.Latitude
-	location.Longitude = r.Location.Longitude
-	location.City = r.City.Names["en"]
-	location.TimeZone = r.Location.TimeZone
+	location.Country = record.Country.ISOCode
+	if record.Location.Latitude != nil {
+		location.Latitude = *record.Location.Latitude
+	}
+	if record.Location.Longitude != nil {
+		location.Longitude = *record.Location.Longitude
+	}
+	location.City = record.City.Names.English
+	location.TimeZone = record.Location.TimeZone
 	return location
 }
 

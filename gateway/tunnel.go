@@ -5,6 +5,8 @@ import (
 	"sync"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/ziyan/gatewaysshd/util/deferutil"
 )
 
 // a tunnel within a ssh connection
@@ -74,12 +76,14 @@ func (self *tunnel) handleTunnel(otherTunnel *tunnel) {
 
 	done1 := make(chan struct{})
 	go func() {
+		defer deferutil.Recover()
 		defer close(done1)
 		_, _ = io.Copy(self.channel, otherTunnel.channel)
 	}()
 
 	done2 := make(chan struct{})
 	go func() {
+		defer deferutil.Recover()
 		defer close(done2)
 		_, _ = io.Copy(otherTunnel.channel, self.channel)
 	}()

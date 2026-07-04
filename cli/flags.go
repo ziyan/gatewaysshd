@@ -4,96 +4,96 @@ import (
 	"os"
 	"time"
 
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v3"
 	"golang.org/x/crypto/ssh"
 )
 
 var flags = []cli.Flag{
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:  "log-level",
 		Value: "DEBUG",
 		Usage: "log level",
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:  "log-format",
 		Value: "%{color}%{time:2006-01-02T15:04:05.000-07:00} [%{level:.4s}] [%{shortfile} %{shortfunc}] %{message}%{color:reset}",
 		Usage: "log format",
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:  "listen-debug",
 		Value: "127.0.0.1:6080",
 		Usage: "debug listen endpoint",
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:  "listen-ssh",
 		Value: ":2020",
 		Usage: "ssh listen endpoint",
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:  "listen-http",
 		Value: "127.0.0.1:2080",
 		Usage: "http listen endpoint",
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:  "ca-public-key",
 		Value: "id_rsa.ca.pub",
 		Usage: "path to certificate authority public key",
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:  "host-public-key",
 		Value: "id_rsa.pub",
 		Usage: "path to host public key or certificate",
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:  "host-private-key",
 		Value: "id_rsa",
 		Usage: "path to host private key",
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:  "server-version",
 		Value: "SSH-2.0-gatewaysshd",
 		Usage: "ssh server version string",
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:  "idle-timeout",
 		Value: "600s",
 		Usage: "ssh connection idle timeout",
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:  "geoip-database",
 		Value: "geoip.mmdb",
 		Usage: "path to the geoip database file",
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:  "postgres-host",
 		Value: "127.0.0.1",
 		Usage: "host of postgres database",
 	},
-	cli.UintFlag{
+	&cli.UintFlag{
 		Name:  "postgres-port",
 		Value: 5432,
 		Usage: "port of postgres database",
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:  "postgres-user",
 		Value: "gatewaysshd",
 		Usage: "user to authenticate with postgres database",
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:  "postgres-password",
 		Value: "gatewaysshd",
 		Usage: "password to authenticate with postgres database",
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:  "postgres-dbname",
 		Value: "gatewaysshd",
 		Usage: "postgres database name",
 	},
 }
 
-func parseCaPublicKeys(c *cli.Context) ([]ssh.PublicKey, error) {
+func parseCaPublicKeys(command *cli.Command) ([]ssh.PublicKey, error) {
 	// get the keys
-	caPublicKeyRaw, err := os.ReadFile(c.String("ca-public-key"))
+	caPublicKeyRaw, err := os.ReadFile(command.String("ca-public-key"))
 	if err != nil {
 		return nil, err
 	}
@@ -109,9 +109,9 @@ func parseCaPublicKeys(c *cli.Context) ([]ssh.PublicKey, error) {
 	return caPublicKeys, nil
 }
 
-func parseHostSigner(c *cli.Context) (ssh.Signer, error) {
+func parseHostSigner(command *cli.Command) (ssh.Signer, error) {
 	// parse host private key
-	hostPrivateKeyRaw, err := os.ReadFile(c.String("host-private-key"))
+	hostPrivateKeyRaw, err := os.ReadFile(command.String("host-private-key"))
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func parseHostSigner(c *cli.Context) (ssh.Signer, error) {
 	}
 
 	// parse host certificate
-	hostPublicKeyRaw, err := os.ReadFile(c.String("host-public-key"))
+	hostPublicKeyRaw, err := os.ReadFile(command.String("host-public-key"))
 	if err != nil {
 		return nil, err
 	}
@@ -140,6 +140,6 @@ func parseHostSigner(c *cli.Context) (ssh.Signer, error) {
 	return hostPrivateKey, nil
 }
 
-func parseIdleTimeout(c *cli.Context) (time.Duration, error) {
-	return time.ParseDuration(c.String("idle-timeout"))
+func parseIdleTimeout(command *cli.Command) (time.Duration, error) {
+	return time.ParseDuration(command.String("idle-timeout"))
 }

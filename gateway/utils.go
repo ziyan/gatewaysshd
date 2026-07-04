@@ -12,8 +12,8 @@ import (
 )
 
 var (
-	ErrInvalidForwardRequest = errors.New("gatewaysshd: invalid forward request")
-	ErrInvalidTunnelData     = errors.New("gatewaysshd: invalid tunnel data")
+	ErrInvalidForwardRequest = errors.New("gateway: invalid forward request")
+	ErrInvalidTunnelData     = errors.New("gateway: invalid tunnel data")
 )
 
 type forwardRequest struct {
@@ -102,26 +102,26 @@ func newUsage() *usageStats {
 	}
 }
 
-func (u *usageStats) read(bytesRead uint64) {
-	u.update(bytesRead, 0)
+func (self *usageStats) read(bytesRead uint64) {
+	self.update(bytesRead, 0)
 }
 
-func (u *usageStats) write(bytesWritten uint64) {
-	u.update(0, bytesWritten)
+func (self *usageStats) write(bytesWritten uint64) {
+	self.update(0, bytesWritten)
 }
 
-// func (u *usageStats) use() {
-// 	u.update(0, 0)
+// func (self *usageStats) use() {
+// 	self.update(0, 0)
 // }
 
-func (u *usageStats) update(bytesRead, bytesWritten uint64) {
+func (self *usageStats) update(bytesRead, bytesWritten uint64) {
 	if bytesRead > 0 {
-		atomic.AddUint64(&u.bytesRead, bytesRead)
+		atomic.AddUint64(&self.bytesRead, bytesRead)
 	}
 	if bytesWritten > 0 {
-		atomic.AddUint64(&u.bytesWritten, bytesWritten)
+		atomic.AddUint64(&self.bytesWritten, bytesWritten)
 	}
-	u.usedAt = time.Now()
+	self.usedAt = time.Now()
 }
 
 type wrappedConn struct {
@@ -166,16 +166,16 @@ func (self *wrappedConn) RemoteAddr() net.Addr {
 	return self.conn.RemoteAddr()
 }
 
-func (self *wrappedConn) SetDeadline(t time.Time) error {
-	return self.conn.SetDeadline(t)
+func (self *wrappedConn) SetDeadline(deadline time.Time) error {
+	return self.conn.SetDeadline(deadline)
 }
 
-func (self *wrappedConn) SetReadDeadline(t time.Time) error {
-	return self.conn.SetReadDeadline(t)
+func (self *wrappedConn) SetReadDeadline(deadline time.Time) error {
+	return self.conn.SetReadDeadline(deadline)
 }
 
-func (self *wrappedConn) SetWriteDeadline(t time.Time) error {
-	return self.conn.SetWriteDeadline(t)
+func (self *wrappedConn) SetWriteDeadline(deadline time.Time) error {
+	return self.conn.SetWriteDeadline(deadline)
 }
 
 func splitCommand(command string) []string {

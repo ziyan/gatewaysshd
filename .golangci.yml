@@ -1,24 +1,26 @@
+version: "2"
+
 run:
   timeout: 10m
-  go: "1.24"
-
-issues:
-  exclude-use-default: false
-
-linters-settings:
-  gocritic:
-    disabled-checks:
-      - ifElseChain
-      - singleCaseSwitch
 
 linters:
   enable:
-    - errcheck
-    - gosimple
-    - govet
-    - ineffassign
-    - staticcheck
-    - unused
-    - gosec
     - gocritic
+    - gosec
     - misspell
+  settings:
+    gocritic:
+      disabled-checks:
+        - ifElseChain
+        - singleCaseSwitch
+    staticcheck:
+      checks:
+        - all
+        - -ST1000
+        - -ST1003
+        # project convention: struct receivers are named self
+        - -ST1006
+        - -ST1016
+        - -ST1020
+        - -ST1021
+        - -ST1022

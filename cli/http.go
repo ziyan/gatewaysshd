@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	ErrNotFound = errors.New("404: not found")
+	ErrNotFound = errors.New("cli: 404 not found")
 )
 
 func wrapHttpHandler(handler func(*http.Request) (interface{}, error)) func(http.ResponseWriter, *http.Request) {

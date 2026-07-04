@@ -58,18 +58,18 @@ func (self *gateway) Close() {
 }
 
 // handle an incoming ssh connection
-func (self *gateway) HandleConnection(c net.Conn) {
-	log.Infof("new tcp connection: remote = %s, local = %s", c.RemoteAddr(), c.LocalAddr())
+func (self *gateway) HandleConnection(socket net.Conn) {
+	log.Infof("new tcp connection: remote = %s, local = %s", socket.RemoteAddr(), socket.LocalAddr())
 	defer func() {
-		if c != nil {
-			if err := c.Close(); err != nil {
+		if socket != nil {
+			if err := socket.Close(); err != nil {
 				log.Warningf("failed to close connection: %s", err)
 			}
 		}
 	}()
 
 	usage := newUsage()
-	conn, channels, requests, err := ssh.NewServerConn(wrapConn(c, usage), self.sshConfig)
+	conn, channels, requests, err := ssh.NewServerConn(wrapConn(socket, usage), self.sshConfig)
 	if err != nil {
 		log.Warningf("failed during ssh handshake: %s", err)
 		return
@@ -87,33 +87,33 @@ func (self *gateway) HandleConnection(c net.Conn) {
 
 	// don't close connection on success
 	conn = nil
-	c = nil
+	socket = nil
 }
 
 // add connection to the list of connections
-func (self *gateway) addConnection(c *connection) {
+func (self *gateway) addConnection(addedConnection *connection) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
-	self.connectionsIndex[c.user] = append([]*connection{c}, self.connectionsIndex[c.user]...)
-	self.connectionsList = append([]*connection{c}, self.connectionsList...)
+	self.connectionsIndex[addedConnection.user] = append([]*connection{addedConnection}, self.connectionsIndex[addedConnection.user]...)
+	self.connectionsList = append([]*connection{addedConnection}, self.connectionsList...)
 }
 
-func (self *gateway) deleteConnection(c *connection) {
+func (self *gateway) deleteConnection(deletedConnection *connection) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
-	connections := make([]*connection, 0, len(self.connectionsIndex[c.user]))
-	for _, connection := range self.connectionsIndex[c.user] {
-		if connection != c {
+	connections := make([]*connection, 0, len(self.connectionsIndex[deletedConnection.user]))
+	for _, connection := range self.connectionsIndex[deletedConnection.user] {
+		if connection != deletedConnection {
 			connections = append(connections, connection)
 		}
 	}
-	self.connectionsIndex[c.user] = connections
+	self.connectionsIndex[deletedConnection.user] = connections
 
 	connections = make([]*connection, 0, len(self.connectionsList))
 	for _, connection := range self.connectionsList {
-		if connection != c {
+		if connection != deletedConnection {
 			connections = append(connections, connection)
 		}
 	}
@@ -125,9 +125,9 @@ func (self *gateway) lookupConnectionService(host string, port uint16) (*connect
 	defer self.lock.Unlock()
 
 	parts := strings.Split(host, ".")
-	for i := range parts {
-		host := strings.Join(parts[:i], ".")
-		user := strings.Join(parts[i:], ".")
+	for index := range parts {
+		host := strings.Join(parts[:index], ".")
+		user := strings.Join(parts[index:], ".")
 
 		for _, connection := range self.connectionsIndex[user] {
 			if connection.lookupService(host, port) {

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"time"
+
+	"github.com/ziyan/gatewaysshd/util/deferutil"
 )
 
 func RunDebugServer(endpoint string) (func(), error) {
@@ -26,6 +28,7 @@ func RunDebugServer(endpoint string) (func(), error) {
 		ReadHeaderTimeout: 30 * time.Second,
 	}
 	go func() {
+		defer deferutil.Recover()
 		log.Debugf("running and serving debug endpoint")
 		if err := debugServer.Serve(debugListener); err != nil && err != http.ErrServerClosed {
 			log.Errorf("debug server exited with error: %s", err)

@@ -34,8 +34,8 @@ type database struct {
 	db *gorm.DB
 }
 
-func Open(host string, port uint16, user, password, dbname string) (Database, error) {
-	connection := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", host, port, user, password, dbname)
+func Open(host string, port uint16, user, password, databaseName string) (Database, error) {
+	connection := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", host, port, user, password, databaseName)
 	db, err := gorm.Open(postgres.Open(connection), &gorm.Config{
 		Logger: logger.New(
 			&logWriter{},

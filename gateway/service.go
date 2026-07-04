@@ -59,8 +59,8 @@ func runService(command string, connection *connection, channel ssh.Channel) err
 // 	return nil
 // }
 
-func (self *service) marshal(v interface{}) error {
-	output, err := json.MarshalIndent(v, "", "  ")
+func (self *service) marshal(value interface{}) error {
+	output, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -114,7 +114,7 @@ func (self *service) handleShell() error {
 			return nil
 		}
 		if err := self.handleCommand(splitCommand(line)); err != nil {
-			if _, err := self.terminal.Write([]byte(fmt.Sprintf("ERROR: %s\n", err))); err != nil {
+			if _, err := fmt.Fprintf(self.terminal, "ERROR: %s\n", err); err != nil {
 				return err
 			}
 			continue

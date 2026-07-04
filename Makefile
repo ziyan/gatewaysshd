@@ -37,11 +37,23 @@ gatewaysshd: $(shell find . -iname '*.go') generate
 lint:
 	@set -e; \
 	if ! hash golangci-lint >/dev/null 2>&1; then \
-		go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8; \
+		go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.4.0; \
 	fi; \
 	go mod download; \
 	golangci-lint cache clean; \
 	golangci-lint run
+
+# run mulint, requires access to git.mujin.co.jp
+.PHONY: lint-mulint
+lint-mulint:
+	@set -e; \
+	if ! hash mulint >/dev/null 2>&1; then \
+		go install git.mujin.co.jp/mujin/dev/mulint/cmd/mulint@latest; \
+	fi; \
+	REPORT_DIR="$$(mktemp -d -t mulint_reports.XXXXXX)"; \
+	trap 'rm -rf "$$REPORT_DIR"' EXIT; \
+	MULINT_REPORT_DIR="$$REPORT_DIR" MULINT_CONFIG="$$(pwd)/mulint.yaml" \
+		go vet -vettool="$$(command -v mulint)" -mod=readonly ./...
 
 # run tests
 .PHONY: test
@@ -63,7 +75,7 @@ test: generate
 		until docker exec $${CONTAINER} pg_isready >/dev/null 2>&1; do \
 			sleep 1; \
 		done; \
-		IP="$$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' $${CONTAINER})"; \
+		IP="$$(docker inspect --format '{{ range .NetworkSettings.Networks }}{{ .IPAddress }}{{ end }}' $${CONTAINER})"; \
 		export GATEWAYSSHD_TEST_DATABASE_HOST="$${IP}"; \
 	fi; \
 	gotestsum --format testname -- -mod=readonly -cover -coverprofile=${BUILD_DIR}/coverage.out ./...; \

@@ -12,6 +12,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/ziyan/gatewaysshd/db"
+	"github.com/ziyan/gatewaysshd/util/deferutil"
 )
 
 var (
@@ -28,8 +29,8 @@ type connection struct {
 	gateway              *gateway
 	conn                 *ssh.ServerConn
 	user                 string
-	remoteAddr           net.Addr
-	localAddr            net.Addr
+	remoteAddress        net.Addr
+	localAddress         net.Addr
 	tunnels              []*tunnel
 	tunnelsOpened        uint64
 	tunnelsClosed        uint64
@@ -58,8 +59,8 @@ func handleConnection(gateway *gateway, conn *ssh.ServerConn, channels <-chan ss
 		gateway:              gateway,
 		conn:                 conn,
 		user:                 conn.User(),
-		remoteAddr:           conn.RemoteAddr(),
-		localAddr:            conn.LocalAddr(),
+		remoteAddress:        conn.RemoteAddr(),
+		localAddress:         conn.LocalAddr(),
 		services:             make(map[string]map[uint16]bool),
 		usage:                usage,
 		permitPortForwarding: permitPortForwarding,
@@ -72,6 +73,7 @@ func handleConnection(gateway *gateway, conn *ssh.ServerConn, channels <-chan ss
 	// handle requests and channels on this connection
 	self.waitGroup.Add(1)
 	go func() {
+		defer deferutil.Recover()
 		defer self.waitGroup.Done()
 		defer func() {
 			self.gateway.deleteConnection(self)
@@ -107,7 +109,7 @@ func handleConnection(gateway *gateway, conn *ssh.ServerConn, channels <-chan ss
 }
 
 func (self *connection) String() string {
-	return fmt.Sprintf("connection(id=%q, remote=%q, user=%q)", self.id, self.remoteAddr, self.user)
+	return fmt.Sprintf("connection(id=%q, remote=%q, user=%q)", self.id, self.remoteAddress, self.user)
 }
 
 // close the ssh connection
@@ -127,22 +129,22 @@ func (self *connection) close() {
 // 	return tunnels
 // }
 
-func (self *connection) addTunnel(t *tunnel) {
+func (self *connection) addTunnel(openedTunnel *tunnel) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
-	self.tunnels = append([]*tunnel{t}, self.tunnels...)
+	self.tunnels = append([]*tunnel{openedTunnel}, self.tunnels...)
 	self.tunnelsOpened += 1
 }
 
-func (self *connection) deleteTunnel(t *tunnel) {
+func (self *connection) deleteTunnel(closedTunnel *tunnel) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
 	// filter the list of channels
 	tunnels := make([]*tunnel, 0, len(self.tunnels))
 	for _, tunnel := range self.tunnels {
-		if tunnel != t {
+		if tunnel != closedTunnel {
 			tunnels = append(tunnels, tunnel)
 		}
 	}
@@ -246,7 +248,7 @@ func (self *connection) gatherStatus() *connectionStatus {
 		User:                 self.user,
 		Administrator:        self.administrator,
 		PermitPortForwarding: self.permitPortForwarding,
-		Address:              self.remoteAddr.String(),
+		Address:              self.remoteAddress.String(),
 		Tunnels:              tunnels,
 		TunnelsActive:        uint64(len(tunnels)),
 		TunnelsOpened:        self.tunnelsOpened,
@@ -318,7 +320,7 @@ func (self *connection) handleRequest(request *ssh.Request) error {
 		}
 
 		if request.Port > 65535 {
-			return fmt.Errorf("port %d is out of range (max 65535)", request.Port)
+			return fmt.Errorf("gateway: port %d is out of range (max 65535)", request.Port)
 		}
 		if err := self.registerService(request.Host, uint16(request.Port)); err != nil {
 			log.Errorf("%s: failed to register service in connection: %s", self, err)
@@ -334,7 +336,7 @@ func (self *connection) handleRequest(request *ssh.Request) error {
 		}
 
 		if request.Port > 65535 {
-			return fmt.Errorf("port %d is out of range (max 65535)", request.Port)
+			return fmt.Errorf("gateway: port %d is out of range (max 65535)", request.Port)
 		}
 		if err := self.deregisterService(request.Host, uint16(request.Port)); err != nil {
 			log.Errorf("%s: failed to register service in connection: %s", self, err)
@@ -384,6 +386,7 @@ func (self *connection) handleChannel(newChannel ssh.NewChannel) error {
 
 	self.waitGroup.Add(1)
 	go func() {
+		defer deferutil.Recover()
 		defer self.waitGroup.Done()
 		ssh.DiscardRequests(requests)
 	}()
@@ -411,6 +414,7 @@ func (self *connection) handleSessionChannel(newChannel ssh.NewChannel) (bool, s
 	// cannot return false from this point on
 	self.waitGroup.Add(1)
 	go func() {
+		defer deferutil.Recover()
 		defer self.waitGroup.Done()
 		handleSession(self, channel, requests, newChannel.ChannelType(), newChannel.ExtraData())
 	}()
@@ -448,6 +452,7 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 
 	self.waitGroup.Add(1)
 	go func() {
+		defer deferutil.Recover()
 		defer self.waitGroup.Done()
 
 		// first need to track the opened channel
@@ -455,7 +460,7 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 			"origin": data.OriginAddress,
 			"to": map[string]interface{}{
 				"user":    otherConnection.user,
-				"address": otherConnection.remoteAddr.String(),
+				"address": otherConnection.remoteAddress.String(),
 			},
 			"service": map[string]interface{}{
 				"host": data.Host,
@@ -464,6 +469,7 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 		})
 		self.waitGroup.Add(1)
 		go func() {
+			defer deferutil.Recover()
 			defer self.waitGroup.Done()
 			thisTunnel.handleRequests(requests)
 		}()
@@ -478,7 +484,7 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 		}), map[string]interface{}{
 			"origin": data.OriginAddress,
 			"from": map[string]interface{}{
-				"address": self.remoteAddr.String(),
+				"address": self.remoteAddress.String(),
 				"user":    self.user,
 			},
 			"service": map[string]interface{}{
@@ -510,6 +516,7 @@ func (self *connection) openTunnel(channelType string, extraData []byte, metadat
 	tunnel := newTunnel(self, channel, channelType, extraData, metadata)
 	self.waitGroup.Add(1)
 	go func() {
+		defer deferutil.Recover()
 		defer self.waitGroup.Done()
 		tunnel.handleRequests(requests)
 	}()

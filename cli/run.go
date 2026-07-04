@@ -11,68 +11,69 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v3"
 	"golang.org/x/crypto/ssh"
 
 	"github.com/ziyan/gatewaysshd/auth"
 	"github.com/ziyan/gatewaysshd/db"
 	"github.com/ziyan/gatewaysshd/gateway"
 	"github.com/ziyan/gatewaysshd/util/debugutil"
+	"github.com/ziyan/gatewaysshd/util/deferutil"
 )
 
-func run(c *cli.Context) error {
+func run(ctx context.Context, command *cli.Command) error {
 	// debugging endpoint, start as early as possible
-	if c.String("listen-debug") != "" {
-		stopDebugServer, err := debugutil.RunDebugServer(c.String("listen-debug"))
+	if command.String("listen-debug") != "" {
+		stopDebugServer, err := debugutil.RunDebugServer(command.String("listen-debug"))
 		if err != nil {
 			return err
 		}
 		defer stopDebugServer()
 	}
 
-	caPublicKeys, err := parseCaPublicKeys(c)
+	caPublicKeys, err := parseCaPublicKeys(command)
 	if err != nil {
-		log.Errorf("failed to parse certificate authority public key from file \"%s\": %s", c.String("ca-public-key"), err)
+		log.Errorf("failed to parse certificate authority public key from file \"%s\": %s", command.String("ca-public-key"), err)
 		return err
 	}
 
-	hostSigner, err := parseHostSigner(c)
+	hostSigner, err := parseHostSigner(command)
 	if err != nil {
-		log.Errorf("failed to host key from file \"%s\" and \"%s\": %s", c.String("host-private-key"), c.String("host-public-key"), err)
+		log.Errorf("failed to host key from file \"%s\" and \"%s\": %s", command.String("host-private-key"), command.String("host-public-key"), err)
 		return err
 	}
 
-	idleTimeout, err := parseIdleTimeout(c)
+	idleTimeout, err := parseIdleTimeout(command)
 	if err != nil {
-		log.Errorf("failed to parse idle timeout \"%s\": %s", c.String("idle-timeout"), err)
+		log.Errorf("failed to parse idle timeout \"%s\": %s", command.String("idle-timeout"), err)
 		return err
 	}
 
 	// ssh listener
-	log.Debugf("listening ssh endpoint: %s", c.String("listen-ssh"))
-	sshListener, err := net.Listen("tcp", c.String("listen-ssh"))
+	log.Debugf("listening ssh endpoint: %s", command.String("listen-ssh"))
+	sshListener, err := net.Listen("tcp", command.String("listen-ssh"))
 	if err != nil {
-		log.Errorf("failed to listen on %s: %s", c.String("listen-ssh"), err)
+		log.Errorf("failed to listen on %s: %s", command.String("listen-ssh"), err)
 		return err
 	}
 
 	// http listener
 	var httpListener net.Listener
-	if c.String("listen-http") != "" {
-		log.Debugf("listening http endpoint: %s", c.String("listen-http"))
-		httpListener, err = net.Listen("tcp", c.String("listen-http"))
+	if command.String("listen-http") != "" {
+		log.Debugf("listening http endpoint: %s", command.String("listen-http"))
+		httpListener, err = net.Listen("tcp", command.String("listen-http"))
 		if err != nil {
-			log.Errorf("failed to listen on %s: %s", c.String("listen-http"), err)
+			log.Errorf("failed to listen on %s: %s", command.String("listen-http"), err)
 			return err
 		}
 	}
 
 	// open database
-	pgPort := c.Uint("postgres-port")
+	pgPort := command.Uint("postgres-port")
 	if pgPort > 65535 {
-		return fmt.Errorf("postgres port %d is out of range (max 65535)", pgPort)
+		return fmt.Errorf("cli: postgres port %d is out of range (max 65535)", pgPort)
 	}
-	database, err := db.Open(c.String("postgres-host"), uint16(pgPort), c.String("postgres-user"), c.String("postgres-password"), c.String("postgres-dbname"))
+	database, err := db.Open(command.String("postgres-host"), uint16(pgPort), command.String("postgres-user"), command.String("postgres-password"), command.String("postgres-dbname"))
 	if err != nil {
 		log.Errorf("failed to open database: %s", err)
 		return err
@@ -88,7 +89,7 @@ func run(c *cli.Context) error {
 	}
 
 	// create ssh auth config
-	sshConfig, err := auth.NewConfig(database, caPublicKeys, c.String("geoip-database"))
+	sshConfig, err := auth.NewConfig(database, caPublicKeys, command.String("geoip-database"))
 	if err != nil {
 		log.Errorf("failed to create ssh config: %s", err)
 		return err
@@ -117,12 +118,12 @@ func run(c *cli.Context) error {
 		ssh.HMACSHA512,
 		ssh.HMACSHA1,
 	}
-	sshConfig.ServerVersion = c.String("server-version")
+	sshConfig.ServerVersion = command.String("server-version")
 	sshConfig.AddHostKey(hostSigner)
 
 	// create gateway
 	gateway, err := gateway.Open(database, sshConfig, &gateway.Settings{
-		Version: c.App.Version,
+		Version: command.Root().Version,
 	})
 	if err != nil {
 		log.Errorf("failed to create ssh gateway: %s", err)
@@ -137,6 +138,7 @@ func run(c *cli.Context) error {
 	sshRunning := make(chan struct{})
 	waitGroup.Add(1)
 	go func() {
+		defer deferutil.Recover()
 		defer waitGroup.Done()
 		defer close(sshRunning)
 
@@ -149,6 +151,7 @@ func run(c *cli.Context) error {
 			}
 			waitGroup.Add(1)
 			go func() {
+				defer deferutil.Recover()
 				defer waitGroup.Done()
 				gateway.HandleConnection(socket)
 			}()
@@ -160,14 +163,15 @@ func run(c *cli.Context) error {
 	// serve http
 	var httpServer *http.Server
 	httpRunning := make(chan struct{})
-	if c.String("listen-http") != "" {
+	if command.String("listen-http") != "" {
 		httpServer = &http.Server{
-			Addr:              c.String("listen-http"),
+			Addr:              command.String("listen-http"),
 			Handler:           newHttpHandler(gateway),
 			ReadHeaderTimeout: 30 * time.Second,
 		}
 		waitGroup.Add(1)
 		go func() {
+			defer deferutil.Recover()
 			defer waitGroup.Done()
 			defer close(httpRunning)
 
@@ -188,8 +192,8 @@ func run(c *cli.Context) error {
 	quit := false
 	for !quit {
 		select {
-		case sig := <-signaling:
-			log.Warningf("received signal %v", sig)
+		case receivedSignal := <-signaling:
+			log.Warningf("received signal %v", receivedSignal)
 			quit = true
 		case <-sshRunning:
 			quit = true
@@ -211,6 +215,7 @@ func run(c *cli.Context) error {
 
 	waitGroup.Add(1)
 	go func() {
+		defer deferutil.Recover()
 		defer waitGroup.Done()
 		if err := sshListener.Close(); err != nil {
 			log.Errorf("failed to close ssh listener: %s", err)
@@ -221,6 +226,7 @@ func run(c *cli.Context) error {
 	if httpServer != nil {
 		waitGroup.Add(1)
 		go func() {
+			defer deferutil.Recover()
 			defer waitGroup.Done()
 			if err := httpServer.Shutdown(context.Background()); err != nil {
 				log.Errorf("failed to shutdown http server: %s", err)
