@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"time"
 
@@ -89,24 +90,96 @@ var flags = []cli.Flag{
 		Value: "gatewaysshd",
 		Usage: "postgres database name",
 	},
+	&cli.StringFlag{
+		Name:  "postgres-sslmode",
+		Value: "disable",
+		Usage: "postgres sslmode (disable, require, verify-ca, verify-full)",
+	},
+	&cli.StringFlag{
+		Name:  "postgres-peer",
+		Value: "",
+		Usage: "peer node ssh address to tunnel postgres through, empty means direct connection",
+	},
+	&cli.StringFlag{
+		Name:  "postgres-peer-host-public-key",
+		Value: "",
+		Usage: "path to the pinned host public key of the postgres peer, required with postgres-peer",
+	},
+	&cli.StringFlag{
+		Name:  "node-id",
+		Value: "",
+		Usage: "unique id of this node in the mesh, empty disables node peering",
+	},
+	&cli.StringFlag{
+		Name:  "node-address",
+		Value: "",
+		Usage: "ssh address where peer nodes can reach this node, empty means not dialable",
+	},
+	&cli.StringFlag{
+		Name:  "node-certificate",
+		Value: "",
+		Usage: "path to the node certificate for the host private key, signed by the peer certificate authority with the \"peer\" principal, empty disables outbound peering",
+	},
+	&cli.StringFlag{
+		Name:  "peer-ca-public-key",
+		Value: "",
+		Usage: "path to certificate authority public keys trusted for inbound peer nodes, empty rejects peer connections",
+	},
 }
 
-func parseCaPublicKeys(command *cli.Command) ([]ssh.PublicKey, error) {
-	// get the keys
-	caPublicKeyRaw, err := os.ReadFile(command.String("ca-public-key"))
+// parsePublicKeys reads one or more public keys in authorized key format
+func parsePublicKeys(path string) ([]ssh.PublicKey, error) {
+	raw, err := os.ReadFile(path) // #nosec G304 - operator-supplied key path
 	if err != nil {
 		return nil, err
 	}
-	var caPublicKeys []ssh.PublicKey
-	for len(caPublicKeyRaw) > 0 {
-		caPublicKey, _, _, rest, err := ssh.ParseAuthorizedKey(caPublicKeyRaw)
+	var publicKeys []ssh.PublicKey
+	for len(raw) > 0 {
+		publicKey, _, _, rest, err := ssh.ParseAuthorizedKey(raw)
 		if err != nil {
 			return nil, err
 		}
-		caPublicKeys = append(caPublicKeys, caPublicKey)
-		caPublicKeyRaw = rest
+		publicKeys = append(publicKeys, publicKey)
+		raw = rest
 	}
-	return caPublicKeys, nil
+	return publicKeys, nil
+}
+
+// parseNodeSigner builds the signer used to authenticate to other nodes, from
+// the host private key and the node certificate signed by the peer
+// certificate authority
+func parseNodeSigner(command *cli.Command) (ssh.Signer, error) {
+	certificatePath := command.String("node-certificate")
+	if certificatePath == "" {
+		return nil, nil
+	}
+
+	hostPrivateKeyRaw, err := os.ReadFile(command.String("host-private-key"))
+	if err != nil {
+		return nil, err
+	}
+	hostPrivateKey, err := ssh.ParsePrivateKey(hostPrivateKeyRaw)
+	if err != nil {
+		return nil, err
+	}
+
+	certificateRaw, err := os.ReadFile(certificatePath) // #nosec G304 - operator-supplied cert path
+	if err != nil {
+		return nil, err
+	}
+	certificatePublicKey, _, _, _, err := ssh.ParseAuthorizedKey(certificateRaw)
+	if err != nil {
+		return nil, err
+	}
+	certificate, ok := certificatePublicKey.(*ssh.Certificate)
+	if !ok {
+		return nil, fmt.Errorf("cli: node certificate file %q does not contain a certificate", certificatePath)
+	}
+	return ssh.NewCertSigner(certificate, hostPrivateKey)
+}
+
+func parseCaPublicKeys(command *cli.Command) ([]ssh.PublicKey, error) {
+	return parsePublicKeys(command.String("ca-public-key"))
 }
 
 func parseHostSigner(command *cli.Command) (ssh.Signer, error) {

@@ -19,6 +19,7 @@ import (
 	"github.com/ziyan/gatewaysshd/gateway"
 	"github.com/ziyan/gatewaysshd/util/debugutil"
 	"github.com/ziyan/gatewaysshd/util/deferutil"
+	"github.com/ziyan/gatewaysshd/util/sshconfig"
 )
 
 func run(ctx context.Context, command *cli.Command) error {
@@ -49,6 +50,23 @@ func run(ctx context.Context, command *cli.Command) error {
 		return err
 	}
 
+	// optional peer certificate authority for inbound peer nodes
+	var peerCaPublicKeys []ssh.PublicKey
+	if path := command.String("peer-ca-public-key"); path != "" {
+		peerCaPublicKeys, err = parsePublicKeys(path)
+		if err != nil {
+			log.Errorf("failed to parse peer certificate authority public key from file \"%s\": %s", path, err)
+			return err
+		}
+	}
+
+	// optional node certificate for outbound peering
+	nodeSigner, err := parseNodeSigner(command)
+	if err != nil {
+		log.Errorf("failed to parse node certificate from file \"%s\": %s", command.String("node-certificate"), err)
+		return err
+	}
+
 	// ssh listener
 	log.Debugf("listening ssh endpoint: %s", command.String("listen-ssh"))
 	sshListener, err := net.Listen("tcp", command.String("listen-ssh"))
@@ -73,7 +91,28 @@ func run(ctx context.Context, command *cli.Command) error {
 	if pgPort > 65535 {
 		return fmt.Errorf("cli: postgres port %d is out of range (max 65535)", pgPort)
 	}
-	database, err := db.Open(command.String("postgres-host"), uint16(pgPort), command.String("postgres-user"), command.String("postgres-password"), command.String("postgres-dbname"))
+	databaseSettings := &db.Settings{
+		Host:         command.String("postgres-host"),
+		Port:         uint16(pgPort),
+		User:         command.String("postgres-user"),
+		Password:     command.String("postgres-password"),
+		DatabaseName: command.String("postgres-dbname"),
+		SSLMode:      command.String("postgres-sslmode"),
+	}
+	if peerAddress := command.String("postgres-peer"); peerAddress != "" {
+		if nodeSigner == nil {
+			return fmt.Errorf("cli: postgres-peer requires node-certificate")
+		}
+		pinnedHostKeys, err := parsePublicKeys(command.String("postgres-peer-host-public-key"))
+		if err != nil || len(pinnedHostKeys) == 0 {
+			log.Errorf("failed to parse postgres peer host public key from file \"%s\": %v", command.String("postgres-peer-host-public-key"), err)
+			return fmt.Errorf("cli: postgres-peer requires postgres-peer-host-public-key")
+		}
+		databaseSettings.PeerAddress = peerAddress
+		databaseSettings.PeerSigner = nodeSigner
+		databaseSettings.PeerHostPublicKey = pinnedHostKeys[0]
+	}
+	database, err := db.Open(databaseSettings)
 	if err != nil {
 		log.Errorf("failed to open database: %s", err)
 		return err
@@ -89,41 +128,41 @@ func run(ctx context.Context, command *cli.Command) error {
 	}
 
 	// create ssh auth config
-	sshConfig, err := auth.NewConfig(database, caPublicKeys, command.String("geoip-database"))
+	sshConfig, err := auth.NewConfig(database, &auth.Settings{
+		CaPublicKeys:     caPublicKeys,
+		PeerCaPublicKeys: peerCaPublicKeys,
+		NodeID:           command.String("node-id"),
+		GeoipDatabase:    command.String("geoip-database"),
+	})
 	if err != nil {
 		log.Errorf("failed to create ssh config: %s", err)
 		return err
 	}
-	// remove insecure key exchanges from the default list of key exchanges (ssh.defaultKexAlgos)
-	sshConfig.KeyExchanges = []string{
-		ssh.KeyExchangeCurve25519,
-		ssh.KeyExchangeECDHP256,
-		ssh.KeyExchangeECDHP384,
-		ssh.KeyExchangeECDHP521,
-		ssh.KeyExchangeDH14SHA256,
-	}
-	// remove insecure ciphers from the default list of ciphers (ssh.defaultCiphers)
-	sshConfig.Ciphers = []string{
-		ssh.CipherAES128GCM,
-		ssh.CipherAES256GCM,
-		ssh.CipherAES128CTR,
-		ssh.CipherAES192CTR,
-		ssh.CipherAES256CTR,
-	}
-	// remove insecure MACs from the default list of MACs (ssh.defaultMACs)
-	sshConfig.MACs = []string{
-		ssh.HMACSHA256ETM,
-		ssh.HMACSHA512ETM,
-		ssh.HMACSHA256,
-		ssh.HMACSHA512,
-		ssh.HMACSHA1,
-	}
+	// remove insecure key exchanges, ciphers, and macs from the defaults
+	sshconfig.ApplySSHCryptoConfig(&sshConfig.Config)
 	sshConfig.ServerVersion = command.String("server-version")
 	sshConfig.AddHostKey(hostSigner)
 
+	// this node only bridges postgres for peers when it has direct access
+	postgresAddress := ""
+	if command.String("postgres-peer") == "" {
+		postgresAddress = fmt.Sprintf("%s:%d", command.String("postgres-host"), pgPort)
+	}
+
+	// host public key published for peer host key pinning
+	hostPublicKey := hostSigner.PublicKey()
+	if certificate, ok := hostPublicKey.(*ssh.Certificate); ok {
+		hostPublicKey = certificate.Key
+	}
+
 	// create gateway
 	gateway, err := gateway.Open(database, sshConfig, &gateway.Settings{
-		Version: command.Root().Version,
+		Version:         command.Root().Version,
+		NodeID:          command.String("node-id"),
+		NodeAddress:     command.String("node-address"),
+		HostPublicKey:   hostPublicKey,
+		NodeSigner:      nodeSigner,
+		PostgresAddress: postgresAddress,
 	})
 	if err != nil {
 		log.Errorf("failed to create ssh gateway: %s", err)

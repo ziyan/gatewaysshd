@@ -108,6 +108,15 @@ func isTransientExecError(err error) bool {
 // database. The test is skipped when GATEWAYSSHD_TEST_DATABASE_HOST is not set.
 func AcquireDatabase(test *testing.T) (db.Database, func()) {
 	test.Helper()
+	database, _, release := AcquireDatabaseWithSettings(test)
+	return database, release
+}
+
+// AcquireDatabaseWithSettings is AcquireDatabase but also returns the
+// connection settings, so tests can open additional connections to the same
+// database (e.g. tunneled through a peer node).
+func AcquireDatabaseWithSettings(test *testing.T) (db.Database, *db.Settings, func()) {
+	test.Helper()
 
 	host := os.Getenv(TestDatabaseHostEnv)
 	if host == "" {
@@ -119,14 +128,21 @@ func AcquireDatabase(test *testing.T) (db.Database, func()) {
 	if err := execAdmin(host, fmt.Sprintf("CREATE DATABASE %q", databaseName)); err != nil {
 		test.Fatalf("failed to create test database: %s", err)
 	}
-	database, err := db.Open(host, testDatabasePort, testDatabaseUser, testDatabasePassword, databaseName)
+	settings := &db.Settings{
+		Host:         host,
+		Port:         testDatabasePort,
+		User:         testDatabaseUser,
+		Password:     testDatabasePassword,
+		DatabaseName: databaseName,
+	}
+	database, err := db.Open(settings)
 	if err != nil {
 		test.Fatalf("failed to open test database: %s", err)
 	}
 	if err := database.Migrate(context.Background()); err != nil {
 		test.Fatalf("failed to migrate test database: %s", err)
 	}
-	return database, func() {
+	return database, settings, func() {
 		if err := database.Close(); err != nil {
 			test.Fatalf("failed to close test database: %s", err)
 		}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -42,6 +43,9 @@ type connection struct {
 	usage                *usageStats
 	permitPortForwarding bool
 	administrator        bool
+
+	// set when this is an inbound connection from a peer node
+	nodeId string
 }
 
 func handleConnection(gateway *gateway, conn *ssh.ServerConn, channels <-chan ssh.NewChannel, requests <-chan *ssh.Request, usage *usageStats) {
@@ -55,11 +59,20 @@ func handleConnection(gateway *gateway, conn *ssh.ServerConn, channels <-chan ss
 		administrator = true
 	}
 
+	// inbound connections from peer nodes carry the node identity
+	nodeId := ""
+	user := conn.User()
+	if _, ok := conn.Permissions.Extensions["peer"]; ok {
+		nodeId = conn.Permissions.Extensions["identity"]
+		user = ""
+	}
+
 	self := &connection{
 		id:                   ksuid.New().String(),
 		gateway:              gateway,
 		conn:                 conn,
-		user:                 conn.User(),
+		user:                 user,
+		nodeId:               nodeId,
 		remoteAddress:        conn.RemoteAddr(),
 		localAddress:         conn.LocalAddr(),
 		services:             make(map[string]map[uint16]bool),
@@ -110,6 +123,9 @@ func handleConnection(gateway *gateway, conn *ssh.ServerConn, channels <-chan ss
 }
 
 func (self *connection) String() string {
+	if self.nodeId != "" {
+		return fmt.Sprintf("connection(id=%q, remote=%q, nodeId=%q)", self.id, self.remoteAddress, self.nodeId)
+	}
 	return fmt.Sprintf("connection(id=%q, remote=%q, user=%q)", self.id, self.remoteAddress, self.user)
 }
 
@@ -428,8 +444,14 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 		return false, ssh.UnknownChannelType, "failed to decode extra data", err
 	}
 
-	// see if this connection is allowed
-	if !self.permitPortForwarding {
+	// peer nodes may tunnel to the local postgres database
+	if data.Host == "postgres" && data.Port == 5432 {
+		return self.handlePostgresChannel(newChannel)
+	}
+
+	// see if this connection is allowed, peer nodes already checked on the
+	// originating node
+	if !self.permitPortForwarding && self.nodeId == "" {
 		log.Errorf("%s: no permission to port forward", self)
 		return false, ssh.Prohibited, "permission denied", ErrPermissionDenied
 	}
@@ -440,7 +462,15 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 	}
 	portU16 := uint16(data.Port) // #nosec G115 - safe: checked above for range
 	otherConnection, host, port := self.gateway.lookupConnectionService(data.Host, portU16)
-	if otherConnection == nil {
+
+	// not found locally, see if the target user is connected to another node
+	// in the mesh, requests that arrived from a peer are never forwarded
+	// again to prevent loops
+	var remotePeer *peer
+	if otherConnection == nil && self.nodeId == "" {
+		remotePeer = self.gateway.lookupRemotePeer(context.Background(), data.Host)
+	}
+	if otherConnection == nil && remotePeer == nil {
 		return false, ssh.ConnectionFailed, "service not found or not online", nil
 	}
 
@@ -457,12 +487,20 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 		defer self.waitGroup.Done()
 
 		// first need to track the opened channel
-		thisTunnel := newTunnel(self, channel, newChannel.ChannelType(), newChannel.ExtraData(), map[string]interface{}{
-			"origin": data.OriginAddress,
-			"to": map[string]interface{}{
+		var toMetadata map[string]interface{}
+		if remotePeer != nil {
+			toMetadata = map[string]interface{}{
+				"nodeId": remotePeer.nodeId,
+			}
+		} else {
+			toMetadata = map[string]interface{}{
 				"user":    otherConnection.user,
 				"address": otherConnection.remoteAddress.String(),
-			},
+			}
+		}
+		thisTunnel := newTunnel(self, channel, newChannel.ChannelType(), newChannel.ExtraData(), map[string]interface{}{
+			"origin": data.OriginAddress,
+			"to":     toMetadata,
 			"service": map[string]interface{}{
 				"host": data.Host,
 				"port": data.Port,
@@ -477,25 +515,45 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 		defer thisTunnel.close()
 
 		// attempt to open a channel, this can block
-		otherTunnel, err := otherConnection.openTunnel("forwarded-tcpip", marshalTunnelData(&tunnelData{
-			Host:          host,
-			Port:          uint32(port),
-			OriginAddress: data.OriginAddress,
-			OriginPort:    data.OriginPort,
-		}), map[string]interface{}{
-			"origin": data.OriginAddress,
-			"from": map[string]interface{}{
-				"address": self.remoteAddress.String(),
-				"user":    self.user,
-			},
-			"service": map[string]interface{}{
-				"host": data.Host,
-				"port": data.Port,
-			},
-		})
-		if err != nil {
-			log.Warningf("%s: failed to open tunnel to %s: %s", self, otherConnection, err)
-			return
+		var otherTunnel *tunnel
+		if remotePeer != nil {
+			// forward the original request to the node the user is on
+			otherTunnel, err = remotePeer.openTunnel("direct-tcpip", marshalTunnelData(data), map[string]interface{}{
+				"origin": data.OriginAddress,
+				"from": map[string]interface{}{
+					"address": self.remoteAddress.String(),
+					"user":    self.user,
+				},
+				"service": map[string]interface{}{
+					"host": data.Host,
+					"port": data.Port,
+				},
+			})
+			if err != nil {
+				log.Warningf("%s: failed to open tunnel to %s via %s: %s", self, data.Host, remotePeer, err)
+				return
+			}
+		} else {
+			otherTunnel, err = otherConnection.openTunnel("forwarded-tcpip", marshalTunnelData(&tunnelData{
+				Host:          host,
+				Port:          uint32(port),
+				OriginAddress: data.OriginAddress,
+				OriginPort:    data.OriginPort,
+			}), map[string]interface{}{
+				"origin": data.OriginAddress,
+				"from": map[string]interface{}{
+					"address": self.remoteAddress.String(),
+					"user":    self.user,
+				},
+				"service": map[string]interface{}{
+					"host": data.Host,
+					"port": data.Port,
+				},
+			})
+			if err != nil {
+				log.Warningf("%s: failed to open tunnel to %s: %s", self, otherConnection, err)
+				return
+			}
 		}
 		defer otherTunnel.close()
 
@@ -522,4 +580,79 @@ func (self *connection) openTunnel(channelType string, extraData []byte, metadat
 		tunnel.handleRequests(requests)
 	}()
 	return tunnel, nil
+}
+
+// handlePostgresChannel bridges a peer node to the local postgres database,
+// so nodes without direct database access can share the central database
+// through this node's ssh service port.
+func (self *connection) handlePostgresChannel(newChannel ssh.NewChannel) (bool, ssh.RejectionReason, string, error) {
+	// only peer nodes can access postgres
+	if self.nodeId == "" {
+		log.Warningf("%s: non-peer connection attempted to access postgres", self)
+		return false, ssh.Prohibited, "permission denied", ErrPermissionDenied
+	}
+	postgresAddress := self.gateway.settings.PostgresAddress
+	if postgresAddress == "" {
+		log.Warningf("%s: peer requested postgres but no postgres address is configured", self)
+		return false, ssh.Prohibited, "permission denied", ErrPermissionDenied
+	}
+
+	log.Infof("%s: peer node opening postgres tunnel to %s", self, postgresAddress)
+
+	channel, requests, err := newChannel.Accept()
+	if err != nil {
+		log.Errorf("%s: failed to accept postgres channel: %s", self, err)
+		return true, 0, "", err
+	}
+
+	self.waitGroup.Add(1)
+	go func() {
+		defer deferutil.Recover()
+		defer self.waitGroup.Done()
+		ssh.DiscardRequests(requests)
+	}()
+
+	self.waitGroup.Add(1)
+	go func() {
+		defer deferutil.Recover()
+		defer self.waitGroup.Done()
+
+		defer func() {
+			if err := channel.Close(); err != nil {
+				log.Warningf("%s: failed to close postgres channel: %s", self, err)
+			}
+		}()
+
+		conn, err := net.DialTimeout("tcp", postgresAddress, 10*time.Second)
+		if err != nil {
+			log.Errorf("%s: failed to connect to postgres at %s: %s", self, postgresAddress, err)
+			return
+		}
+		defer func() {
+			if err := conn.Close(); err != nil {
+				log.Warningf("%s: failed to close postgres connection: %s", self, err)
+			}
+		}()
+
+		done1 := make(chan struct{})
+		go func() {
+			defer deferutil.Recover()
+			defer close(done1)
+			_, _ = io.Copy(channel, conn)
+		}()
+
+		done2 := make(chan struct{})
+		go func() {
+			defer deferutil.Recover()
+			defer close(done2)
+			_, _ = io.Copy(conn, channel)
+		}()
+
+		select {
+		case <-done1:
+		case <-done2:
+		}
+	}()
+
+	return true, 0, "", nil
 }

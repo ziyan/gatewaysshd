@@ -21,7 +21,6 @@ type tunnel struct {
 }
 
 func newTunnel(connection *connection, channel ssh.Channel, channelType string, extraData []byte, metadata map[string]interface{}) *tunnel {
-	log.Infof("%s: new tunnel: type = %s, metadata = %v", connection, channelType, metadata)
 	self := &tunnel{
 		connection:  connection,
 		channel:     channel,
@@ -30,8 +29,19 @@ func newTunnel(connection *connection, channel ssh.Channel, channelType string, 
 		done:        make(chan struct{}),
 		metadata:    metadata,
 	}
-	connection.addTunnel(self)
+	log.Infof("%s: new tunnel: type = %s, metadata = %v", self.owner(), channelType, metadata)
+	if connection != nil {
+		connection.addTunnel(self)
+	}
 	return self
+}
+
+// owner describes where the tunnel came from, peer tunnels have no connection
+func (self *tunnel) owner() string {
+	if self.connection != nil {
+		return self.connection.String()
+	}
+	return "peer"
 }
 
 // close the tunnel
@@ -43,11 +53,13 @@ func (self *tunnel) close() {
 
 func (self *tunnel) handleRequests(requests <-chan *ssh.Request) {
 	defer func() {
-		self.connection.deleteTunnel(self)
-		if err := self.channel.Close(); err != nil {
-			log.Warningf("%s: failed to close tunnel: %s", self.connection, err)
+		if self.connection != nil {
+			self.connection.deleteTunnel(self)
 		}
-		log.Infof("%s: tunnel closed: type = %s, metadata = %v", self.connection, self.channelType, self.metadata)
+		if err := self.channel.Close(); err != nil {
+			log.Warningf("%s: failed to close tunnel: %s", self.owner(), err)
+		}
+		log.Infof("%s: tunnel closed: type = %s, metadata = %v", self.owner(), self.channelType, self.metadata)
 	}()
 
 	for {
@@ -62,7 +74,7 @@ func (self *tunnel) handleRequests(requests <-chan *ssh.Request) {
 			// reply to client
 			if request.WantReply {
 				if err := request.Reply(false, nil); err != nil {
-					log.Errorf("%s: failed to reply to request: %s", self.connection, err)
+					log.Errorf("%s: failed to reply to request: %s", self.owner(), err)
 					return
 				}
 			}
