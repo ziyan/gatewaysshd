@@ -78,9 +78,12 @@ func Open(settings *Settings) (Database, error) {
 		if err != nil {
 			return nil, err
 		}
-		// the transport is the tunnel, but pgx still resolves the host
-		// before dialing, so it must be resolvable
-		config.Host = "localhost"
+		// the DialFunc tunnels every connection, so skip the real DNS lookup
+		// pgx would otherwise do for the configured host. keep config.Host
+		// untouched so it remains the TLS server name for verify-ca/verify-full.
+		config.LookupFunc = func(ctx context.Context, host string) ([]string, error) {
+			return []string{host}, nil
+		}
 		config.DialFunc = func(ctx context.Context, network, address string) (net.Conn, error) {
 			return dialPostgresViaPeer(settings.PeerAddress, settings.PeerSigner, settings.PeerHostPublicKey, &self.waitGroup)
 		}

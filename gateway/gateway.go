@@ -86,7 +86,7 @@ func Open(database db.Database, sshConfig *ssh.ServerConfig, settings *Settings)
 		done:             make(chan struct{}),
 	}
 	if settings.NodeID != "" {
-		if err := self.registerNode(context.Background(), true); err != nil {
+		if err := self.registerNode(context.Background(), true, true); err != nil {
 			return nil, err
 		}
 		self.waitGroup.Add(1)
@@ -116,7 +116,7 @@ func (self *gateway) Close() {
 	self.waitGroup.Wait()
 
 	// mark this node as offline in the database
-	if err := self.registerNode(context.Background(), false); err != nil {
+	if err := self.registerNode(context.Background(), false, false); err != nil {
 		log.Warningf("failed to mark node as offline: %s", err)
 	}
 }
@@ -220,8 +220,10 @@ func (self *gateway) lookupRemotePeer(ctx context.Context, host string) *peer {
 		}
 		model, err := self.database.GetUser(ctx, user)
 		if err != nil {
+			// a transient error on one candidate must not abort resolving the
+			// remaining, more-specific user suffixes
 			log.Warningf("failed to look up user %q for mesh tunneling: %s", user, err)
-			return nil
+			continue
 		}
 		if model == nil || model.NodeID == "" || model.NodeID == self.settings.NodeID {
 			continue

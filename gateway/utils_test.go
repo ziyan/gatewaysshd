@@ -81,20 +81,20 @@ func TestTunnelDataRejectsInvalidPorts(t *testing.T) {
 
 func TestUsageStatsUpdate(t *testing.T) {
 	usage := newUsage()
-	before := usage.usedAt
+	before := usage.getUsedAt()
 
 	usage.read(100)
 	usage.write(25)
 	usage.update(3, 4)
 
-	if usage.bytesRead != 103 {
-		t.Fatalf("expected 103 bytes read, got %d", usage.bytesRead)
+	if usage.getBytesRead() != 103 {
+		t.Fatalf("expected 103 bytes read, got %d", usage.getBytesRead())
 	}
-	if usage.bytesWritten != 29 {
-		t.Fatalf("expected 29 bytes written, got %d", usage.bytesWritten)
+	if usage.getBytesWritten() != 29 {
+		t.Fatalf("expected 29 bytes written, got %d", usage.getBytesWritten())
 	}
-	if usage.usedAt.Before(before) {
-		t.Fatalf("expected usedAt to advance, got %s < %s", usage.usedAt, before)
+	if usage.getUsedAt().Before(before) {
+		t.Fatalf("expected usedAt to advance, got %s < %s", usage.getUsedAt(), before)
 	}
 }
 

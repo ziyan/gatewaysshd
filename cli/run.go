@@ -129,8 +129,8 @@ func run(ctx context.Context, command *cli.Command) error {
 
 	// create ssh auth config
 	sshConfig, err := auth.NewConfig(database, &auth.Settings{
-		CaPublicKeys:     caPublicKeys,
-		PeerCaPublicKeys: peerCaPublicKeys,
+		CAPublicKeys:     caPublicKeys,
+		PeerCAPublicKeys: peerCaPublicKeys,
 		NodeID:           command.String("node-id"),
 		GeoipDatabase:    command.String("geoip-database"),
 	})

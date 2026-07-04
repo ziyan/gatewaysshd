@@ -38,6 +38,7 @@ type connection struct {
 	tunnelsClosed        uint64
 	services             map[string]map[uint16]bool
 	done                 chan struct{}
+	closeOnce            sync.Once
 	lock                 sync.Mutex
 	waitGroup            sync.WaitGroup
 	usage                *usageStats
@@ -82,10 +83,13 @@ func handleConnection(gateway *gateway, conn *ssh.ServerConn, channels <-chan ss
 		done:                 make(chan struct{}),
 	}
 	log.Infof("%s: new connection", self)
+
+	// take the waitGroup token before publishing the connection to the gateway,
+	// so a concurrent Close()/waitGroup.Wait() cannot race this Add
+	self.waitGroup.Add(1)
 	self.gateway.addConnection(self)
 
 	// handle requests and channels on this connection
-	self.waitGroup.Add(1)
 	go func() {
 		defer deferutil.Recover()
 		defer self.waitGroup.Done()
@@ -129,10 +133,13 @@ func (self *connection) String() string {
 	return fmt.Sprintf("connection(id=%q, remote=%q, user=%q)", self.id, self.remoteAddress, self.user)
 }
 
-// close the ssh connection
+// close the ssh connection. safe to call from multiple goroutines
+// (shutdown, scavenger, kickUser) concurrently.
 func (self *connection) close() {
 	defer self.waitGroup.Wait()
-	close(self.done)
+	self.closeOnce.Do(func() {
+		close(self.done)
+	})
 	log.Debugf("%s: connection closed", self)
 }
 
@@ -171,10 +178,7 @@ func (self *connection) deleteTunnel(closedTunnel *tunnel) {
 
 // returns the last used time of the connection
 func (self *connection) getUsedAt() time.Time {
-	self.lock.Lock()
-	defer self.lock.Unlock()
-
-	return self.usage.usedAt
+	return self.usage.getUsedAt()
 }
 
 // returns the list of services this connection advertises
@@ -271,11 +275,11 @@ func (self *connection) gatherStatus() *connectionStatus {
 		TunnelsOpened:        self.tunnelsOpened,
 		TunnelsClosed:        self.tunnelsClosed,
 		CreatedAt:            self.usage.createdAt,
-		UsedAt:               self.usage.usedAt,
+		UsedAt:               self.usage.getUsedAt(),
 		UpTime:               uint64(time.Since(self.usage.createdAt).Seconds()),
-		IdleTime:             uint64(time.Since(self.usage.usedAt).Seconds()),
-		BytesRead:            self.usage.bytesRead,
-		BytesWritten:         self.usage.bytesWritten,
+		IdleTime:             uint64(time.Since(self.usage.getUsedAt()).Seconds()),
+		BytesRead:            self.usage.getBytesRead(),
+		BytesWritten:         self.usage.getBytesWritten(),
 		Services:             services,
 	}
 }
@@ -382,11 +386,13 @@ func (self *connection) handleChannel(newChannel ssh.NewChannel) error {
 	switch newChannel.ChannelType() {
 	case "session":
 		// peer connections have no user and must not reach the session
-		// handlers, which would otherwise write an empty-named user row
+		// handlers, which would otherwise write an empty-named user row.
+		// leave err nil so it takes the leak-free reject path below.
 		if self.nodeId != "" {
-			return newChannel.Reject(ssh.Prohibited, "sessions not allowed on peer connections")
+			ok, rejection, message, err = false, ssh.Prohibited, "sessions not allowed on peer connections", nil
+		} else {
+			ok, rejection, message, err = self.handleSessionChannel(newChannel)
 		}
-		ok, rejection, message, err = self.handleSessionChannel(newChannel)
 	case "direct-tcpip":
 		ok, rejection, message, err = self.handleTunnelChannel(newChannel)
 	}
@@ -449,8 +455,9 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 		return false, ssh.UnknownChannelType, "failed to decode extra data", err
 	}
 
-	// peer nodes may tunnel to the local postgres database
-	if data.Host == "postgres" && data.Port == 5432 {
+	// peer nodes may tunnel to the local postgres database; gate on the peer
+	// connection so a regular user's service named "postgres" is not shadowed
+	if self.nodeId != "" && data.Host == "postgres" && data.Port == 5432 {
 		return self.handlePostgresChannel(newChannel)
 	}
 

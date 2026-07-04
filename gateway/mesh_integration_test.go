@@ -47,8 +47,8 @@ func startTestNode(t *testing.T, database db.Database, userCaSigner, peerCaSigne
 
 	hostSigner := newTestSigner(t)
 	sshConfig, err := auth.NewConfig(database, &auth.Settings{
-		CaPublicKeys:     []ssh.PublicKey{userCaSigner.PublicKey()},
-		PeerCaPublicKeys: []ssh.PublicKey{peerCaSigner.PublicKey()},
+		CAPublicKeys:     []ssh.PublicKey{userCaSigner.PublicKey()},
+		PeerCAPublicKeys: []ssh.PublicKey{peerCaSigner.PublicKey()},
 		NodeID:           nodeId,
 		GeoipDatabase:    "missing-geoip.mmdb",
 	})
@@ -211,8 +211,8 @@ func TestGatewayPostgresViaPeer(t *testing.T) {
 
 	hostSigner := newTestSigner(t)
 	sshConfig, err := auth.NewConfig(database, &auth.Settings{
-		CaPublicKeys:     []ssh.PublicKey{userCaSigner.PublicKey()},
-		PeerCaPublicKeys: []ssh.PublicKey{peerCaSigner.PublicKey()},
+		CAPublicKeys:     []ssh.PublicKey{userCaSigner.PublicKey()},
+		PeerCAPublicKeys: []ssh.PublicKey{peerCaSigner.PublicKey()},
 		NodeID:           "node-central",
 		GeoipDatabase:    "missing-geoip.mmdb",
 	})
@@ -343,8 +343,18 @@ func TestGatewayPostgresRequiresPeer(t *testing.T) {
 		_ = client.Close()
 	}()
 
-	if _, err := client.Dial("tcp", "postgres:5432"); err == nil {
-		t.Fatal("expected postgres tunnel to be rejected for regular users")
+	// a regular user gets no postgres bridge: "postgres:5432" is just an
+	// ordinary (unregistered) service, so the tunnel is accepted then closed
+	// rather than bridged to the database
+	tunnel, err := client.Dial("tcp", "postgres:5432")
+	if err != nil {
+		return // rejected outright is also acceptable
+	}
+	defer func() {
+		_ = tunnel.Close()
+	}()
+	if _, err := tunnel.Read(make([]byte, 1)); err == nil {
+		t.Fatal("regular user reached the postgres bridge")
 	}
 }
 
@@ -443,5 +453,52 @@ func TestGatewayPeerExtensionNotForgeable(t *testing.T) {
 	}
 	if _, err := client.Dial("tcp", "anything.someone:22"); err == nil {
 		t.Fatal("forged peer extension bypassed port-forward permission")
+	}
+}
+
+// TestGatewayPeerSessionRejected proves a peer connection cannot open a session
+// channel (which would drive PutUser with an empty username).
+func TestGatewayPeerSessionRejected(t *testing.T) {
+	t.Parallel()
+	database, release := dbtest.AcquireDatabase(t)
+	defer release()
+
+	peerCaSigner := newTestSigner(t)
+	userCaSigner := newTestSigner(t)
+	address, _, releaseNode := startTestNode(t, database, userCaSigner, peerCaSigner, "node-a", "")
+	defer releaseNode()
+
+	// dial as a genuine peer node
+	client, err := ssh.Dial("tcp", address, &ssh.ClientConfig{
+		User:            auth.PeerUser,
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(newNodeCertSigner(t, peerCaSigner, "node-b"))},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
+		Timeout:         10 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("failed to dial as peer: %s", err)
+	}
+	defer func() {
+		_ = client.Close()
+	}()
+
+	// the session channel is rejected via accept-then-close, so NewSession may
+	// succeed client-side but running a command (which would reach the session
+	// handlers) must fail and must not create an empty-named user
+	session, err := client.NewSession()
+	if err == nil {
+		// a bare JSON command takes the legacy status path -> reportStatus ->
+		// PutUser(self.user); for a peer self.user is "", so without the
+		// session gate this would create an empty-named user
+		_ = session.Run("{}")
+		_ = session.Close()
+	}
+
+	user, err := database.GetUser(t.Context(), "")
+	if err != nil {
+		t.Fatalf("failed to query empty user: %s", err)
+	}
+	if user != nil {
+		t.Fatalf("peer session created an empty-named user: %+v", user)
 	}
 }

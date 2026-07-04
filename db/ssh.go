@@ -68,6 +68,10 @@ func (self *tunnelConn) Close() error {
 	return self.client.Close()
 }
 
+// ssh channels do not support deadlines, so the deadline setters are no-ops.
+// query-level context timeouts therefore cannot interrupt in-flight I/O over
+// the tunnel; callers relying on them must set a connect timeout instead. This
+// matches the transport being an already-authenticated, encrypted ssh channel.
 func (self *tunnelConn) LocalAddr() net.Addr                       { return &net.TCPAddr{} }
 func (self *tunnelConn) RemoteAddr() net.Addr                      { return &net.TCPAddr{} }
 func (self *tunnelConn) SetDeadline(deadline time.Time) error      { return nil }

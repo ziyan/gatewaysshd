@@ -28,11 +28,11 @@ const PeerUser = "peer"
 
 type Settings struct {
 	// certificate authorities trusted for regular user certificates
-	CaPublicKeys []ssh.PublicKey
+	CAPublicKeys []ssh.PublicKey
 
 	// certificate authorities trusted for peer node certificates, empty
 	// disables inbound peer connections
-	PeerCaPublicKeys []ssh.PublicKey
+	PeerCAPublicKeys []ssh.PublicKey
 
 	// id of this node, recorded on users at auth time for mesh tunneling
 	NodeID string
@@ -71,7 +71,7 @@ func (self *authenticator) authenticate(meta ssh.ConnMetadata, publicKey ssh.Pub
 	// check certificate
 	certificateChecker := &ssh.CertChecker{
 		IsUserAuthority: func(publicKey ssh.PublicKey) bool {
-			for _, caPublicKey := range self.settings.CaPublicKeys {
+			for _, caPublicKey := range self.settings.CAPublicKeys {
 				if bytes.Equal(caPublicKey.Marshal(), publicKey.Marshal()) {
 					return true
 				}
@@ -123,14 +123,14 @@ func (self *authenticator) authenticate(meta ssh.ConnMetadata, publicKey ssh.Pub
 // its key id identifies the node. Permissions are built fresh so certificate
 // extensions never grant user-level capabilities.
 func (self *authenticator) authenticatePeer(meta ssh.ConnMetadata, publicKey ssh.PublicKey) (*ssh.Permissions, error) {
-	if len(self.settings.PeerCaPublicKeys) == 0 {
+	if len(self.settings.PeerCAPublicKeys) == 0 {
 		log.Warningf("rejected peer connection from %s: no peer certificate authority configured", meta.RemoteAddr())
 		return nil, ErrInvalidCredentials
 	}
 
 	certificateChecker := &ssh.CertChecker{
 		IsUserAuthority: func(publicKey ssh.PublicKey) bool {
-			for _, caPublicKey := range self.settings.PeerCaPublicKeys {
+			for _, caPublicKey := range self.settings.PeerCAPublicKeys {
 				if bytes.Equal(caPublicKey.Marshal(), publicKey.Marshal()) {
 					return true
 				}

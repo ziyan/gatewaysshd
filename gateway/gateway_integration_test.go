@@ -68,7 +68,7 @@ func startTestGateway(t *testing.T) (string, ssh.Signer, gateway.Gateway, db.Dat
 
 	caSigner := newTestSigner(t)
 	sshConfig, err := auth.NewConfig(database, &auth.Settings{
-		CaPublicKeys:  []ssh.PublicKey{caSigner.PublicKey()},
+		CAPublicKeys:  []ssh.PublicKey{caSigner.PublicKey()},
 		GeoipDatabase: "missing-geoip.mmdb",
 	})
 	if err != nil {
