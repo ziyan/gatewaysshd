@@ -36,6 +36,16 @@ var flags = []cli.Flag{
 		Usage: "http listen endpoint",
 	},
 	&cli.StringFlag{
+		Name:  "listen-socks",
+		Value: "",
+		Usage: "optional socks5 proxy listen endpoint, reaches any exposed service unauthenticated (like ssh -D), empty disables it",
+	},
+	&cli.StringFlag{
+		Name:  "listen-http-proxy",
+		Value: "",
+		Usage: "optional http forward proxy (CONNECT) listen endpoint, reaches any exposed service unauthenticated, empty disables it",
+	},
+	&cli.StringFlag{
 		Name:  "ca-public-key",
 		Value: "id_rsa.ca.pub",
 		Usage: "path to certificate authority public key",

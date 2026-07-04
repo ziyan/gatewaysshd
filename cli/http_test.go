@@ -18,6 +18,8 @@ type fakeGateway struct {
 
 func (self *fakeGateway) Close()                            {}
 func (self *fakeGateway) HandleConnection(net.Conn)         {}
+func (self *fakeGateway) HandleSocksConnection(net.Conn)    {}
+func (self *fakeGateway) HTTPProxyHandler() http.Handler    { return nil }
 func (self *fakeGateway) ScavengeConnections(time.Duration) {}
 func (self *fakeGateway) ListUsers(context.Context) (interface{}, error) {
 	return map[string]interface{}{"users": []string{"alice"}}, nil

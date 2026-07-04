@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"net"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -49,6 +50,8 @@ type Gateway interface {
 	Close()
 
 	HandleConnection(net.Conn)
+	HandleSocksConnection(net.Conn)
+	HTTPProxyHandler() http.Handler
 	ScavengeConnections(time.Duration)
 
 	ListUsers(context.Context) (interface{}, error)
@@ -235,6 +238,40 @@ func (self *gateway) lookupRemotePeer(ctx context.Context, host string) *peer {
 		log.Debugf("lookup: user %q is on node %s but no peer connection is available", user, model.NodeID)
 	}
 	return nil
+}
+
+// openServiceTunnel opens a tunnel to the exposed service host:port on behalf
+// of an external proxy client (socks/http). It mirrors the routing in
+// connection.handleTunnelChannel: a locally-connected service first, otherwise
+// a service on a peer node. originAddress/originPort describe the proxy client.
+func (self *gateway) openServiceTunnel(host string, port uint16, originAddress string, originPort uint32) (*tunnel, error) {
+	metadata := map[string]interface{}{
+		"origin": originAddress,
+		"service": map[string]interface{}{
+			"host": host,
+			"port": port,
+		},
+	}
+	if otherConnection, serviceHost, servicePort := self.lookupConnectionService(host, port); otherConnection != nil {
+		return otherConnection.openTunnel("forwarded-tcpip", marshalTunnelData(&tunnelData{
+			Host:          serviceHost,
+			Port:          uint32(servicePort),
+			OriginAddress: originAddress,
+			OriginPort:    originPort,
+		}), metadata)
+	}
+	lookupContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	remotePeer := self.lookupRemotePeer(lookupContext, host)
+	cancel()
+	if remotePeer != nil {
+		return remotePeer.openTunnel("direct-tcpip", marshalTunnelData(&tunnelData{
+			Host:          host,
+			Port:          uint32(port),
+			OriginAddress: originAddress,
+			OriginPort:    originPort,
+		}), metadata)
+	}
+	return nil, ErrServiceNotFound
 }
 
 // returns a list of connections
