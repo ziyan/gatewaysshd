@@ -410,3 +410,38 @@ func TestGatewayNodeRegistration(t *testing.T) {
 		t.Fatalf("expected node to be offline after close, got %+v", node)
 	}
 }
+
+// TestGatewayPeerExtensionNotForgeable proves a regular user certificate that
+// carries a "peer"/"identity" extension is NOT treated as a peer node: the
+// user certificate authority must not be able to grant node capabilities.
+func TestGatewayPeerExtensionNotForgeable(t *testing.T) {
+	t.Parallel()
+	database, release := dbtest.AcquireDatabase(t)
+	defer release()
+
+	peerCaSigner := newTestSigner(t)
+	userCaSigner := newTestSigner(t)
+	// this node has a real postgres address, so a genuine peer could bridge it
+	address, _, releaseNode := startTestNode(t, database, userCaSigner, peerCaSigner, "node-a", "127.0.0.1:5432")
+	defer releaseNode()
+
+	// a user certificate (signed by the user CA) forging the peer markers, and
+	// deliberately without permit-port-forwarding
+	forged := newCertSigner(t, userCaSigner, "mallory", map[string]string{
+		"peer":     "",
+		"identity": "node-evil",
+	})
+	client := dialTestGateway(t, address, forged, "mallory")
+	defer func() {
+		_ = client.Close()
+	}()
+
+	// if the forged extension had been honored, nodeId != "" would bypass the
+	// port-forward check and unlock the postgres bridge; both must be denied
+	if _, err := client.Dial("tcp", "postgres:5432"); err == nil {
+		t.Fatal("forged peer extension granted postgres access")
+	}
+	if _, err := client.Dial("tcp", "anything.someone:22"); err == nil {
+		t.Fatal("forged peer extension bypassed port-forward permission")
+	}
+}

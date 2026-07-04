@@ -381,6 +381,11 @@ func (self *connection) handleChannel(newChannel ssh.NewChannel) error {
 
 	switch newChannel.ChannelType() {
 	case "session":
+		// peer connections have no user and must not reach the session
+		// handlers, which would otherwise write an empty-named user row
+		if self.nodeId != "" {
+			return newChannel.Reject(ssh.Prohibited, "sessions not allowed on peer connections")
+		}
 		ok, rejection, message, err = self.handleSessionChannel(newChannel)
 	case "direct-tcpip":
 		ok, rejection, message, err = self.handleTunnelChannel(newChannel)
@@ -468,7 +473,9 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 	// again to prevent loops
 	var remotePeer *peer
 	if otherConnection == nil && self.nodeId == "" {
-		remotePeer = self.gateway.lookupRemotePeer(context.Background(), data.Host)
+		lookupContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		remotePeer = self.gateway.lookupRemotePeer(lookupContext, data.Host)
+		cancel()
 	}
 	if otherConnection == nil && remotePeer == nil {
 		return false, ssh.ConnectionFailed, "service not found or not online", nil
@@ -486,18 +493,35 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 		defer deferutil.Recover()
 		defer self.waitGroup.Done()
 
-		// first need to track the opened channel
+		// pick the target: a remote peer (forward the original request to the
+		// node the user is on) or a local connection (resolved host/port)
+		var target tunnelOpener
+		var targetChannelType string
+		var targetData []byte
 		var toMetadata map[string]interface{}
 		if remotePeer != nil {
+			target = remotePeer
+			targetChannelType = "direct-tcpip"
+			targetData = marshalTunnelData(data)
 			toMetadata = map[string]interface{}{
 				"nodeId": remotePeer.nodeId,
 			}
 		} else {
+			target = otherConnection
+			targetChannelType = "forwarded-tcpip"
+			targetData = marshalTunnelData(&tunnelData{
+				Host:          host,
+				Port:          uint32(port),
+				OriginAddress: data.OriginAddress,
+				OriginPort:    data.OriginPort,
+			})
 			toMetadata = map[string]interface{}{
 				"user":    otherConnection.user,
 				"address": otherConnection.remoteAddress.String(),
 			}
 		}
+
+		// first need to track the opened channel
 		thisTunnel := newTunnel(self, channel, newChannel.ChannelType(), newChannel.ExtraData(), map[string]interface{}{
 			"origin": data.OriginAddress,
 			"to":     toMetadata,
@@ -515,45 +539,20 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 		defer thisTunnel.close()
 
 		// attempt to open a channel, this can block
-		var otherTunnel *tunnel
-		if remotePeer != nil {
-			// forward the original request to the node the user is on
-			otherTunnel, err = remotePeer.openTunnel("direct-tcpip", marshalTunnelData(data), map[string]interface{}{
-				"origin": data.OriginAddress,
-				"from": map[string]interface{}{
-					"address": self.remoteAddress.String(),
-					"user":    self.user,
-				},
-				"service": map[string]interface{}{
-					"host": data.Host,
-					"port": data.Port,
-				},
-			})
-			if err != nil {
-				log.Warningf("%s: failed to open tunnel to %s via %s: %s", self, data.Host, remotePeer, err)
-				return
-			}
-		} else {
-			otherTunnel, err = otherConnection.openTunnel("forwarded-tcpip", marshalTunnelData(&tunnelData{
-				Host:          host,
-				Port:          uint32(port),
-				OriginAddress: data.OriginAddress,
-				OriginPort:    data.OriginPort,
-			}), map[string]interface{}{
-				"origin": data.OriginAddress,
-				"from": map[string]interface{}{
-					"address": self.remoteAddress.String(),
-					"user":    self.user,
-				},
-				"service": map[string]interface{}{
-					"host": data.Host,
-					"port": data.Port,
-				},
-			})
-			if err != nil {
-				log.Warningf("%s: failed to open tunnel to %s: %s", self, otherConnection, err)
-				return
-			}
+		otherTunnel, err := target.openTunnel(targetChannelType, targetData, map[string]interface{}{
+			"origin": data.OriginAddress,
+			"from": map[string]interface{}{
+				"address": self.remoteAddress.String(),
+				"user":    self.user,
+			},
+			"service": map[string]interface{}{
+				"host": data.Host,
+				"port": data.Port,
+			},
+		})
+		if err != nil {
+			log.Warningf("%s: failed to open tunnel to %s via %s: %s", self, data.Host, target, err)
+			return
 		}
 		defer otherTunnel.close()
 

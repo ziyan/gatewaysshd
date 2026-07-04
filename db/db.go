@@ -110,6 +110,17 @@ func Open(settings *Settings) (Database, error) {
 }
 
 func (self *database) Close() error {
+	// closing the pool closes every pooled connection, which for the peer
+	// tunnel mode closes the underlying ssh client via tunnelConn.Close
+	sqlDatabase, err := self.db.DB()
+	if err != nil {
+		return err
+	}
+	if err := sqlDatabase.Close(); err != nil {
+		return err
+	}
+	// wait for the per-tunnel request-draining goroutines to exit
+	self.waitGroup.Wait()
 	return nil
 }
 

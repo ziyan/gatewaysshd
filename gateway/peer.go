@@ -1,16 +1,13 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"net"
 	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/ziyan/gatewaysshd/auth"
 	"github.com/ziyan/gatewaysshd/db"
 	"github.com/ziyan/gatewaysshd/util/deferutil"
 	"github.com/ziyan/gatewaysshd/util/sshconfig"
@@ -67,22 +64,6 @@ func (self *peer) close() {
 	})
 }
 
-// checkPinnedHostKey accepts the remote host key when it, or the key embedded
-// in its certificate, matches the pinned public key. Peer nodes have host
-// certificates signed by their own certificate authority which this node does
-// not necessarily trust, so the key itself is pinned from the node record.
-func checkPinnedHostKey(pinned ssh.PublicKey) ssh.HostKeyCallback {
-	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
-		if certificate, ok := key.(*ssh.Certificate); ok {
-			key = certificate.Key
-		}
-		if !bytes.Equal(key.Marshal(), pinned.Marshal()) {
-			return fmt.Errorf("gateway: host key mismatch for peer %s", hostname)
-		}
-		return nil
-	}
-}
-
 // register this node in the database so other nodes can discover it
 func (self *gateway) registerNode(ctx context.Context, online bool) error {
 	if self.settings.NodeID == "" {
@@ -96,8 +77,12 @@ func (self *gateway) registerNode(ctx context.Context, online bool) error {
 	if _, err := self.database.PutNode(ctx, self.settings.NodeID, func(node *db.Node) error {
 		node.Address = self.settings.NodeAddress
 		node.HostPublicKey = hostPublicKey
+		// OnlineAt marks when the online state last changed, so only stamp it
+		// on a transition instead of every heartbeat
+		if node.Online != online || node.OnlineAt.IsZero() {
+			node.OnlineAt = now
+		}
 		node.Online = online
-		node.OnlineAt = now
 		return nil
 	}); err != nil {
 		return err
@@ -140,15 +125,7 @@ func (self *gateway) connectToPeer(node *db.Node) {
 		return
 	}
 
-	config := &ssh.ClientConfig{
-		User: auth.PeerUser,
-		Auth: []ssh.AuthMethod{
-			ssh.PublicKeys(self.settings.NodeSigner),
-		},
-		HostKeyCallback: checkPinnedHostKey(pinnedHostKey),
-		Timeout:         10 * time.Second,
-	}
-	sshconfig.ApplySSHCryptoConfig(&config.Config)
+	config := sshconfig.NewPeerClientConfig(self.settings.NodeSigner, pinnedHostKey)
 
 	client, err := ssh.Dial("tcp", node.Address, config)
 	if err != nil {
@@ -166,6 +143,19 @@ func (self *gateway) connectToPeer(node *db.Node) {
 	// remove from peers map at the end
 	defer self.removePeer(peer)
 	defer peer.close()
+
+	// close the peer when the gateway shuts down so client.Wait() below
+	// unblocks even for a peer registered after Close()'s snapshot
+	watchDone := make(chan struct{})
+	defer close(watchDone)
+	go func() {
+		defer deferutil.Recover()
+		select {
+		case <-self.done:
+			peer.close()
+		case <-watchDone:
+		}
+	}()
 
 	// wait until connection is done
 	log.Noticef("connected to peer %s at %s", node.ID, node.Address)
@@ -194,8 +184,11 @@ func (self *gateway) runPeers(ctx context.Context) {
 			}
 			for _, peer := range self.listPeers() {
 				if err := peer.ping(); err != nil {
-					log.Warningf("failed to ping peer node %q: %s", peer.nodeId, err)
-					continue
+					// evict the dead peer so the next discovery reconnects it,
+					// otherwise getPeer keeps returning a broken connection
+					log.Warningf("evicting unresponsive peer node %q: %s", peer.nodeId, err)
+					self.removePeer(peer)
+					peer.close()
 				}
 			}
 		}
@@ -232,13 +225,11 @@ func (self *gateway) addPeer(peer *peer) bool {
 	return true
 }
 
-func (self *gateway) removePeer(peer *peer) bool {
+func (self *gateway) removePeer(peer *peer) {
 	self.peersLock.Lock()
 	defer self.peersLock.Unlock()
 
 	if self.peers[peer.nodeId] == peer {
 		delete(self.peers, peer.nodeId)
-		return true
 	}
-	return false
 }

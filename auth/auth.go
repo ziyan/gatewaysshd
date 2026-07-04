@@ -87,6 +87,12 @@ func (self *authenticator) authenticate(meta ssh.ConnMetadata, publicKey ssh.Pub
 		return nil, err
 	}
 
+	// peer status must come only from authenticatePeer, never from a user
+	// certificate extension: the user certificate authority must not be able
+	// to grant node/peer capabilities.
+	delete(permissions.Extensions, "peer")
+	delete(permissions.Extensions, "identity")
+
 	// update user in database
 	user, err := self.database.PutUser(context.Background(), meta.User(), func(model *db.User) error {
 		model.IP = ip.String()

@@ -9,6 +9,14 @@ import (
 	"github.com/ziyan/gatewaysshd/util/deferutil"
 )
 
+// tunnelOpener is a target a tunnel can be forwarded to: either a local
+// connection or a remote peer node. Both expose the same channel-open surface,
+// so mesh and single-node forwarding share one code path.
+type tunnelOpener interface {
+	openTunnel(channelType string, extraData []byte, metadata map[string]interface{}) (*tunnel, error)
+	String() string
+}
+
 // a tunnel within a ssh connection
 type tunnel struct {
 	connection  *connection

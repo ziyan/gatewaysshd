@@ -1,7 +1,6 @@
 package db
 
 import (
-	"bytes"
 	"fmt"
 	"net"
 	"sync"
@@ -21,34 +20,10 @@ type tunnelData struct {
 	OriginPort    uint32
 }
 
-// checkPinnedHostKey accepts the remote host key when it, or the key embedded
-// in its certificate, matches the pinned public key. The peer's host
-// certificate is signed by that node's own certificate authority which this
-// node does not necessarily trust, so the key itself is pinned instead.
-func checkPinnedHostKey(pinned ssh.PublicKey) ssh.HostKeyCallback {
-	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
-		if certificate, ok := key.(*ssh.Certificate); ok {
-			key = certificate.Key
-		}
-		if !bytes.Equal(key.Marshal(), pinned.Marshal()) {
-			return fmt.Errorf("db: host key mismatch for peer %s", hostname)
-		}
-		return nil
-	}
-}
-
 // dialPostgresViaPeer creates a net.Conn to the remote postgres by opening a
 // direct-tcpip channel to "postgres:5432" over a peer node's ssh service port.
 func dialPostgresViaPeer(address string, signer ssh.Signer, pinnedHostKey ssh.PublicKey, waitGroup *sync.WaitGroup) (net.Conn, error) {
-	config := &ssh.ClientConfig{
-		User: "peer",
-		Auth: []ssh.AuthMethod{
-			ssh.PublicKeys(signer),
-		},
-		HostKeyCallback: checkPinnedHostKey(pinnedHostKey),
-		Timeout:         10 * time.Second,
-	}
-	sshconfig.ApplySSHCryptoConfig(&config.Config)
+	config := sshconfig.NewPeerClientConfig(signer, pinnedHostKey)
 
 	client, err := ssh.Dial("tcp", address, config)
 	if err != nil {
