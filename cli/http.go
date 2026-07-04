@@ -52,10 +52,10 @@ func wrapHttpHandler(handler func(*http.Request) (interface{}, error)) func(http
 func newHttpHandler(gateway gateway.Gateway) http.Handler {
 	router := mux.NewRouter().StrictSlash(true)
 	router.Path("/api/user").HandlerFunc(wrapHttpHandler(func(request *http.Request) (interface{}, error) {
-		return gateway.ListUsers()
+		return gateway.ListUsers(request.Context())
 	}))
 	router.Path("/api/user/{userId}").HandlerFunc(wrapHttpHandler(func(request *http.Request) (interface{}, error) {
-		user, err := gateway.GetUser(mux.Vars(request)["userId"])
+		user, err := gateway.GetUser(request.Context(), mux.Vars(request)["userId"])
 		if err != nil {
 			return nil, err
 		}
@@ -65,7 +65,7 @@ func newHttpHandler(gateway gateway.Gateway) http.Handler {
 		return user, nil
 	}))
 	router.Path("/api/user/{userId}/screenshot").HandlerFunc(wrapHttpHandler(func(request *http.Request) (interface{}, error) {
-		screenshot, err := gateway.GetUserScreenshot(mux.Vars(request)["userId"])
+		screenshot, err := gateway.GetUserScreenshot(request.Context(), mux.Vars(request)["userId"])
 		if err != nil {
 			return nil, err
 		}

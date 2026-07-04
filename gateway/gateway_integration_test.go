@@ -141,7 +141,7 @@ func TestGatewayCertificateAuthentication(t *testing.T) {
 	}()
 
 	// authentication must have created the user in the database
-	user, err := instance.GetUser("alice")
+	user, err := instance.GetUser(t.Context(), "alice")
 	if err != nil {
 		t.Fatalf("failed to get user: %s", err)
 	}
@@ -273,7 +273,7 @@ func TestGatewayRejectsDisabledUser(t *testing.T) {
 	address, caSigner, _, database, release := startTestGateway(t)
 	defer release()
 
-	if _, err := database.PutUser("mallory", func(user *db.User) error {
+	if _, err := database.PutUser(t.Context(), "mallory", func(user *db.User) error {
 		user.Disabled = true
 		return nil
 	}); err != nil {

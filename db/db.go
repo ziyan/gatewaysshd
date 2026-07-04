@@ -7,6 +7,7 @@
 package db
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -20,14 +21,14 @@ var log = logging.MustGetLogger("db")
 
 type Database interface {
 	// migrate database schema
-	Migrate() error
+	Migrate(context.Context) error
 
 	// close opened database
 	Close() error
 
-	ListUsers() ([]*User, error)
-	GetUser(string) (*User, error)
-	PutUser(string, func(*User) error) (*User, error)
+	ListUsers(context.Context) ([]*User, error)
+	GetUser(context.Context, string) (*User, error)
+	PutUser(context.Context, string, func(*User) error) (*User, error)
 }
 
 type database struct {

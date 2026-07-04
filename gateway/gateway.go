@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"net"
 	"strings"
 	"sync"
@@ -25,9 +26,9 @@ type Gateway interface {
 	HandleConnection(net.Conn)
 	ScavengeConnections(time.Duration)
 
-	ListUsers() (interface{}, error)
-	GetUser(string) (interface{}, error)
-	GetUserScreenshot(string) ([]byte, error)
+	ListUsers(context.Context) (interface{}, error)
+	GetUser(context.Context, string) (interface{}, error)
+	GetUserScreenshot(context.Context, string) ([]byte, error)
 }
 
 type gateway struct {
@@ -188,8 +189,8 @@ func (self *gateway) gatherStatus(user string) map[string]interface{} {
 	}
 }
 
-func (self *gateway) ListUsers() (interface{}, error) {
-	users, err := self.database.ListUsers()
+func (self *gateway) ListUsers(ctx context.Context) (interface{}, error) {
+	users, err := self.database.ListUsers(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -215,8 +216,8 @@ func (self *gateway) ListUsers() (interface{}, error) {
 	}, nil
 }
 
-func (self *gateway) GetUser(userId string) (interface{}, error) {
-	user, err := self.database.GetUser(userId)
+func (self *gateway) GetUser(ctx context.Context, userId string) (interface{}, error) {
+	user, err := self.database.GetUser(ctx, userId)
 	if err != nil {
 		return nil, err
 	}
@@ -244,8 +245,8 @@ func (self *gateway) GetUser(userId string) (interface{}, error) {
 	}, nil
 }
 
-func (self *gateway) GetUserScreenshot(userId string) ([]byte, error) {
-	user, err := self.database.GetUser(userId)
+func (self *gateway) GetUserScreenshot(ctx context.Context, userId string) ([]byte, error) {
+	user, err := self.database.GetUser(ctx, userId)
 	if err != nil {
 		return nil, err
 	}

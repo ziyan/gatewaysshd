@@ -119,7 +119,7 @@ func TestGatewayReportStatus(t *testing.T) {
 	}
 	runCommandWithInput(t, client, "reportStatus", compressed.Bytes())
 
-	response, err := instance.GetUser("alice")
+	response, err := instance.GetUser(t.Context(), "alice")
 	if err != nil {
 		t.Fatalf("failed to get user: %s", err)
 	}
@@ -145,7 +145,7 @@ func TestGatewayLegacyJsonStatusReport(t *testing.T) {
 	// legacy clients send the json status as the exec command itself
 	_ = runCommand(t, client, `{"legacy":true}`)
 
-	response, err := instance.GetUser("alice")
+	response, err := instance.GetUser(t.Context(), "alice")
 	if err != nil {
 		t.Fatalf("failed to get user: %s", err)
 	}
@@ -171,7 +171,7 @@ func TestGatewayReportScreenshot(t *testing.T) {
 	screenshot := []byte{0x89, 0x50, 0x4e, 0x47}
 	runCommandWithInput(t, client, "reportScreenshot", screenshot)
 
-	saved, err := instance.GetUserScreenshot("alice")
+	saved, err := instance.GetUserScreenshot(t.Context(), "alice")
 	if err != nil {
 		t.Fatalf("failed to get screenshot: %s", err)
 	}
@@ -245,7 +245,7 @@ func TestGatewayKickUserRequiresAdministrator(t *testing.T) {
 	_ = session.Close()
 
 	// the administrator flag is granted at auth time from the user record
-	if _, err := database.PutUser("root", func(user *db.User) error {
+	if _, err := database.PutUser(t.Context(), "root", func(user *db.User) error {
 		user.Administrator = true
 		return nil
 	}); err != nil {

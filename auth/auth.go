@@ -2,6 +2,7 @@ package auth
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"net"
 	"net/netip"
@@ -63,7 +64,7 @@ func (self *authenticator) authenticate(meta ssh.ConnMetadata, publicKey ssh.Pub
 	}
 
 	// update user in database
-	user, err := self.database.PutUser(meta.User(), func(model *db.User) error {
+	user, err := self.database.PutUser(context.Background(), meta.User(), func(model *db.User) error {
 		model.IP = ip.String()
 		model.Location = location
 		return nil

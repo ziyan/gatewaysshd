@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -279,7 +280,7 @@ func (self *service) reportScreenshot() error {
 }
 
 func (self *service) listUsers() error {
-	output, err := self.connection.gateway.ListUsers()
+	output, err := self.connection.gateway.ListUsers(context.Background())
 	if err != nil {
 		return err
 	}
@@ -287,7 +288,7 @@ func (self *service) listUsers() error {
 }
 
 func (self *service) getUser(userId string) error {
-	output, err := self.connection.gateway.GetUser(userId)
+	output, err := self.connection.gateway.GetUser(context.Background(), userId)
 	if err != nil {
 		return err
 	}

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -178,7 +179,7 @@ func (self *connection) getUsedAt() time.Time {
 // }
 
 func (self *connection) reportStatus(status json.RawMessage) error {
-	if _, err := self.gateway.database.PutUser(self.user, func(model *db.User) error {
+	if _, err := self.gateway.database.PutUser(context.Background(), self.user, func(model *db.User) error {
 		model.Status = db.Status(status)
 		return nil
 	}); err != nil {
@@ -189,7 +190,7 @@ func (self *connection) reportStatus(status json.RawMessage) error {
 }
 
 func (self *connection) reportScreenshot(screenshot []byte) error {
-	if _, err := self.gateway.database.PutUser(self.user, func(model *db.User) error {
+	if _, err := self.gateway.database.PutUser(context.Background(), self.user, func(model *db.User) error {
 		model.Screenshot = screenshot
 		return nil
 	}); err != nil {

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -18,11 +19,11 @@ type fakeGateway struct {
 func (self *fakeGateway) Close()                            {}
 func (self *fakeGateway) HandleConnection(net.Conn)         {}
 func (self *fakeGateway) ScavengeConnections(time.Duration) {}
-func (self *fakeGateway) ListUsers() (interface{}, error) {
+func (self *fakeGateway) ListUsers(context.Context) (interface{}, error) {
 	return map[string]interface{}{"users": []string{"alice"}}, nil
 }
 
-func (self *fakeGateway) GetUser(userId string) (interface{}, error) {
+func (self *fakeGateway) GetUser(ctx context.Context, userId string) (interface{}, error) {
 	user, ok := self.users[userId]
 	if !ok {
 		return nil, nil
@@ -30,7 +31,7 @@ func (self *fakeGateway) GetUser(userId string) (interface{}, error) {
 	return user, nil
 }
 
-func (self *fakeGateway) GetUserScreenshot(userId string) ([]byte, error) {
+func (self *fakeGateway) GetUserScreenshot(ctx context.Context, userId string) ([]byte, error) {
 	return self.screenshots[userId], nil
 }
 

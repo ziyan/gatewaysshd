@@ -15,7 +15,7 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	defer release()
 
 	// AcquireDatabase already migrated once, a second run must be a no-op
-	if err := database.Migrate(); err != nil {
+	if err := database.Migrate(t.Context()); err != nil {
 		t.Fatalf("failed to migrate twice: %s", err)
 	}
 }
@@ -32,7 +32,7 @@ func TestPutUserCreatesAndGetUserRoundTrips(t *testing.T) {
 		Country:   "JP",
 		City:      "Tokyo",
 	}
-	created, err := database.PutUser("alice", func(user *db.User) error {
+	created, err := database.PutUser(t.Context(), "alice", func(user *db.User) error {
 		user.Comment = "test user"
 		user.IP = "203.0.113.7"
 		user.Location = location
@@ -48,7 +48,7 @@ func TestPutUserCreatesAndGetUserRoundTrips(t *testing.T) {
 		t.Fatalf("expected timestamps to be set, got %+v", created)
 	}
 
-	user, err := database.GetUser("alice")
+	user, err := database.GetUser(t.Context(), "alice")
 	if err != nil {
 		t.Fatalf("failed to get user: %s", err)
 	}
@@ -79,7 +79,7 @@ func TestGetUserMissingReturnsNil(t *testing.T) {
 	database, release := dbtest.AcquireDatabase(t)
 	defer release()
 
-	user, err := database.GetUser("missing")
+	user, err := database.GetUser(t.Context(), "missing")
 	if err != nil {
 		t.Fatalf("failed to get missing user: %s", err)
 	}
@@ -93,7 +93,7 @@ func TestPutUserUpdatesExistingUser(t *testing.T) {
 	database, release := dbtest.AcquireDatabase(t)
 	defer release()
 
-	created, err := database.PutUser("bob", func(user *db.User) error {
+	created, err := database.PutUser(t.Context(), "bob", func(user *db.User) error {
 		user.Comment = "before"
 		return nil
 	})
@@ -101,7 +101,7 @@ func TestPutUserUpdatesExistingUser(t *testing.T) {
 		t.Fatalf("failed to create user: %s", err)
 	}
 
-	updated, err := database.PutUser("bob", func(user *db.User) error {
+	updated, err := database.PutUser(t.Context(), "bob", func(user *db.User) error {
 		if user.Comment != "before" {
 			t.Fatalf("modifier expected existing user, got %+v", user)
 		}
@@ -119,7 +119,7 @@ func TestPutUserUpdatesExistingUser(t *testing.T) {
 		t.Fatalf("expected creation time to be preserved, got %s != %s", updated.CreatedAt, created.CreatedAt)
 	}
 
-	user, err := database.GetUser("bob")
+	user, err := database.GetUser(t.Context(), "bob")
 	if err != nil {
 		t.Fatalf("failed to get user: %s", err)
 	}
@@ -134,7 +134,7 @@ func TestListUsersOmitsHeavyColumns(t *testing.T) {
 	defer release()
 
 	for _, name := range []string{"alice", "bob"} {
-		if _, err := database.PutUser(name, func(user *db.User) error {
+		if _, err := database.PutUser(t.Context(), name, func(user *db.User) error {
 			user.Status = db.Status(`{"healthy":true}`)
 			user.Screenshot = []byte{0x89}
 			return nil
@@ -143,7 +143,7 @@ func TestListUsersOmitsHeavyColumns(t *testing.T) {
 		}
 	}
 
-	users, err := database.ListUsers()
+	users, err := database.ListUsers(t.Context())
 	if err != nil {
 		t.Fatalf("failed to list users: %s", err)
 	}

@@ -7,6 +7,7 @@
 package dbtest
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -122,7 +123,7 @@ func AcquireDatabase(test *testing.T) (db.Database, func()) {
 	if err != nil {
 		test.Fatalf("failed to open test database: %s", err)
 	}
-	if err := database.Migrate(); err != nil {
+	if err := database.Migrate(context.Background()); err != nil {
 		test.Fatalf("failed to migrate test database: %s", err)
 	}
 	return database, func() {

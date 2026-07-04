@@ -83,7 +83,7 @@ func run(ctx context.Context, command *cli.Command) error {
 			log.Errorf("failed to close database: %s", err)
 		}
 	}()
-	if err := database.Migrate(); err != nil {
+	if err := database.Migrate(ctx); err != nil {
 		log.Errorf("failed to migrate database: %s", err)
 		return err
 	}

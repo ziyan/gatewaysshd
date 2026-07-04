@@ -1,15 +1,16 @@
 package db
 
 import (
+	"context"
 	"errors"
 	"time"
 
 	"gorm.io/gorm"
 )
 
-func (self *database) ListUsers() ([]*User, error) {
+func (self *database) ListUsers(ctx context.Context) ([]*User, error) {
 	var results []*User
-	if err := self.db.Transaction(func(tx *gorm.DB) error {
+	if err := self.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var models []User
 		if err := tx.Select([]string{
 			"id",
@@ -34,9 +35,9 @@ func (self *database) ListUsers() ([]*User, error) {
 	return results, nil
 }
 
-func (self *database) GetUser(userId string) (*User, error) {
+func (self *database) GetUser(ctx context.Context, userId string) (*User, error) {
 	var result *User
-	if err := self.db.Transaction(func(tx *gorm.DB) error {
+	if err := self.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var model User
 		if err := tx.Where("id = ?", userId).First(&model).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -52,9 +53,9 @@ func (self *database) GetUser(userId string) (*User, error) {
 	return result, nil
 }
 
-func (self *database) PutUser(userId string, modifier func(*User) error) (*User, error) {
+func (self *database) PutUser(ctx context.Context, userId string, modifier func(*User) error) (*User, error) {
 	var result *User
-	if err := self.db.Transaction(func(tx *gorm.DB) error {
+	if err := self.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var create bool
 		var model User
 		if err := tx.Where("id = ?", userId).First(&model).Error; err != nil {
