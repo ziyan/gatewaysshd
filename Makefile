@@ -59,6 +59,7 @@ lint-mulint:
 .PHONY: test
 test: generate
 	@set -e; \
+	mkdir -p ${BUILD_DIR}; \
 	if ! hash gotestsum >/dev/null 2>&1; then \
 		go install gotest.tools/gotestsum@v1.13.0; \
 	fi; \
