@@ -1,0 +1,159 @@
+package db_test
+
+import (
+	"encoding/json"
+	"testing"
+	"time"
+
+	"github.com/ziyan/gatewaysshd/db"
+	"github.com/ziyan/gatewaysshd/db/dbtest"
+)
+
+func TestMigrateIsIdempotent(t *testing.T) {
+	t.Parallel()
+	database, release := dbtest.AcquireDatabase(t)
+	defer release()
+
+	// AcquireDatabase already migrated once, a second run must be a no-op
+	if err := database.Migrate(); err != nil {
+		t.Fatalf("failed to migrate twice: %s", err)
+	}
+}
+
+func TestPutUserCreatesAndGetUserRoundTrips(t *testing.T) {
+	t.Parallel()
+	database, release := dbtest.AcquireDatabase(t)
+	defer release()
+
+	location := db.Location{
+		Latitude:  35.6595,
+		Longitude: 139.7005,
+		TimeZone:  "Asia/Tokyo",
+		Country:   "JP",
+		City:      "Tokyo",
+	}
+	created, err := database.PutUser("alice", func(user *db.User) error {
+		user.Comment = "test user"
+		user.IP = "203.0.113.7"
+		user.Location = location
+		user.Administrator = true
+		user.Status = db.Status(`{"healthy":true}`)
+		user.Screenshot = []byte{0x89, 0x50, 0x4e, 0x47}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("failed to create user: %s", err)
+	}
+	if created.CreatedAt.IsZero() || created.ModifiedAt.IsZero() {
+		t.Fatalf("expected timestamps to be set, got %+v", created)
+	}
+
+	user, err := database.GetUser("alice")
+	if err != nil {
+		t.Fatalf("failed to get user: %s", err)
+	}
+	if user == nil {
+		t.Fatal("expected user, got nil")
+	}
+	if user.Comment != "test user" || user.IP != "203.0.113.7" || !user.Administrator {
+		t.Fatalf("unexpected user: %+v", user)
+	}
+	if user.Location != location {
+		t.Fatalf("expected location %+v, got %+v", location, user.Location)
+	}
+	// jsonb normalizes whitespace, compare parsed content
+	var status map[string]bool
+	if err := json.Unmarshal(user.Status, &status); err != nil {
+		t.Fatalf("failed to parse status %s: %s", user.Status, err)
+	}
+	if !status["healthy"] {
+		t.Fatalf("unexpected status: %s", user.Status)
+	}
+	if len(user.Screenshot) != 4 {
+		t.Fatalf("unexpected screenshot: %v", user.Screenshot)
+	}
+}
+
+func TestGetUserMissingReturnsNil(t *testing.T) {
+	t.Parallel()
+	database, release := dbtest.AcquireDatabase(t)
+	defer release()
+
+	user, err := database.GetUser("missing")
+	if err != nil {
+		t.Fatalf("failed to get missing user: %s", err)
+	}
+	if user != nil {
+		t.Fatalf("expected nil, got %+v", user)
+	}
+}
+
+func TestPutUserUpdatesExistingUser(t *testing.T) {
+	t.Parallel()
+	database, release := dbtest.AcquireDatabase(t)
+	defer release()
+
+	created, err := database.PutUser("bob", func(user *db.User) error {
+		user.Comment = "before"
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("failed to create user: %s", err)
+	}
+
+	updated, err := database.PutUser("bob", func(user *db.User) error {
+		if user.Comment != "before" {
+			t.Fatalf("modifier expected existing user, got %+v", user)
+		}
+		user.Comment = "after"
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("failed to update user: %s", err)
+	}
+	if updated.Comment != "after" {
+		t.Fatalf("expected updated comment, got %q", updated.Comment)
+	}
+	// postgres stores timestamps with microsecond precision
+	if !updated.CreatedAt.Equal(created.CreatedAt.Truncate(time.Microsecond)) {
+		t.Fatalf("expected creation time to be preserved, got %s != %s", updated.CreatedAt, created.CreatedAt)
+	}
+
+	user, err := database.GetUser("bob")
+	if err != nil {
+		t.Fatalf("failed to get user: %s", err)
+	}
+	if user.Comment != "after" {
+		t.Fatalf("expected persisted comment, got %q", user.Comment)
+	}
+}
+
+func TestListUsersOmitsHeavyColumns(t *testing.T) {
+	t.Parallel()
+	database, release := dbtest.AcquireDatabase(t)
+	defer release()
+
+	for _, name := range []string{"alice", "bob"} {
+		if _, err := database.PutUser(name, func(user *db.User) error {
+			user.Status = db.Status(`{"healthy":true}`)
+			user.Screenshot = []byte{0x89}
+			return nil
+		}); err != nil {
+			t.Fatalf("failed to create user %s: %s", name, err)
+		}
+	}
+
+	users, err := database.ListUsers()
+	if err != nil {
+		t.Fatalf("failed to list users: %s", err)
+	}
+	if len(users) != 2 {
+		t.Fatalf("expected 2 users, got %d", len(users))
+	}
+	for _, user := range users {
+		// status and screenshot are intentionally not selected by ListUsers
+		if len(user.Status) != 0 || len(user.Screenshot) != 0 {
+			t.Fatalf("expected heavy columns to be omitted, got %+v", user)
+		}
+	}
+}
