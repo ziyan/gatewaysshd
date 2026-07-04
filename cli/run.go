@@ -228,7 +228,7 @@ func run(ctx context.Context, command *cli.Command) error {
 		go func() {
 			defer deferutil.Recover()
 			defer waitGroup.Done()
-			if err := httpServer.Shutdown(context.Background()); err != nil {
+			if err := httpServer.Shutdown(ctx); err != nil {
 				log.Errorf("failed to shutdown http server: %s", err)
 			}
 		}()

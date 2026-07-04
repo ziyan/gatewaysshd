@@ -37,7 +37,7 @@ gatewaysshd: $(shell find . -iname '*.go') generate
 lint:
 	@set -e; \
 	if ! hash golangci-lint >/dev/null 2>&1; then \
-		go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.4.0; \
+		go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2; \
 	fi; \
 	go mod download; \
 	golangci-lint cache clean; \
@@ -60,7 +60,7 @@ lint-mulint:
 test: generate
 	@set -e; \
 	if ! hash gotestsum >/dev/null 2>&1; then \
-		go install gotest.tools/gotestsum@v1.12.0; \
+		go install gotest.tools/gotestsum@v1.13.0; \
 	fi; \
 	if hash docker >/dev/null 2>&1; then \
 		CONTAINER="$$(docker run \
