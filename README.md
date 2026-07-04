@@ -1,74 +1,159 @@
-[![Build Status](https://travis-ci.org/ziyan/gatewaysshd.svg?branch=master)](https://travis-ci.org/ziyan/gatewaysshd)
+# gatewaysshd
 
-What is `gatewaysshd`?
-======================
+[![CI](https://github.com/ziyan/gatewaysshd/actions/workflows/ci.yml/badge.svg)](https://github.com/ziyan/gatewaysshd/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ziyan/gatewaysshd)](https://github.com/ziyan/gatewaysshd/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-`gatewaysshd` is a daemon that provides a meeting place for all your SSH tunnels. It is especially useful if you have many hard-to-reach machines running behind firewalls and you want to access services running on them over SSH from anywhere in the world.
+`gatewaysshd` is a daemon that provides a meeting place for all your SSH
+tunnels. It is especially useful when you have many hard-to-reach machines
+running behind firewalls and NAT, and you want to reach services on them over
+SSH from anywhere in the world — without opening a single inbound port on
+those machines.
 
-For example, if you have a workstation in the office, you can use `supervisor` or `upstart` or something similar to run a SSH client as a respawning daemon and make it stay always connected:
+## How it works
 
-```
-$ ssh -T -N workstation@gateway -R ssh:22:localhost:22
-```
-
-At home you can ssh to your workstation simply by:
-
-```
-$ ssh -T -N username@gateway -L 2222:ssh.workstation:22
-```
+Machines behind firewalls keep a persistent SSH connection to the gateway and
+remote-forward the ports they want to expose, giving each one a service name:
 
 ```
-$ ssh -p 2222 localhost
+workstation$ ssh -T -N workstation@gateway -R ssh:22:localhost:22 -R web:80:localhost:80
 ```
 
-You can check what sessions are connected on the gateway server:
+The gateway does **not** actually open those ports on the server. Forwarded
+ports are a virtual concept: the gateway just remembers who advertised what,
+and connects the two ends internally when another client asks for the
+service. This relieves you of assigning and managing real port numbers on the
+server.
+
+From anywhere else, a service is addressed as `service.username`, like a
+hostname:
 
 ```
-$ ssh -T username@gateway
-[
-  {
-    "address": "1.2.3.4:1234",
-    "channels_count": 1,
-    "services": {},
-    "timestamp": 1440668695,
-    "uptime": 0,
-    "user": "username"
-  },
-  {
-    "address": "5.6.7.8:1234",
-    "channels_count": 0,
-    "services": {
-      "ssh": [
-        22
-      ],
-      "web": [
-        80
-      ]
-    },
-    "timestamp": 1440668286,
-    "uptime": 409,
-    "user": "workstation"
-  }
-]
+laptop$ ssh -T -N username@gateway -L 2222:ssh.workstation:22
+laptop$ ssh -p 2222 localhost
 ```
 
-When you remote forward a local port, `gatewaysshd` does not actually open the port on the server side. The ports you specified is a virtual concept for `gatewaysshd`. It simply keeps track of forwarded ports and internally connect and tunnel the ports when requested by another client. This relieves you the burden of assigning managing ports on the server side.
+Authentication is by SSH user certificates only: every client presents a
+certificate signed by your certificate authority, and the gateway records the
+users, their reported status, and their geolocation in postgres.
 
-You also specifies a service name for the remote forwarded port, `ssh` or `web` for example. When connecting to these services from another client, they can be referred to as `service.username` just like a normal hostname.
+## Features
 
+- **Virtual port forwarding** — expose services by name (`web.alice`),
+  no server-side port allocation, no inbound ports on the client machines.
+- **Certificate-based authentication** — a single CA public key controls who
+  can connect; per-user permissions (port forwarding, administrator) are
+  carried in the certificate and the database.
+- **Built-in shell** — `ssh username@gateway` gives you `status`,
+  `listUsers`, `getUser`, `kickUser` (admin), `ping`, and `version` commands.
+- **Status reporting** — clients can push arbitrary JSON status and
+  screenshots that are stored per user and served over the HTTP API.
+- **HTTP API** — `/api/user`, `/api/user/{id}`, `/api/user/{id}/screenshot`
+  for dashboards and monitoring.
+- **GeoIP** — optionally resolves each user's location from a MaxMind
+  database.
+- **Hardened crypto defaults** — insecure key exchanges, ciphers, and MACs
+  are disabled out of the box.
 
-Build
-=====
+## Installation
 
-```bash
-# format code
-gofmt -l -w gateway cli
+Prebuilt binaries for linux, macOS, and windows are on the
+[releases page](https://github.com/ziyan/gatewaysshd/releases).
 
-# build and strip executable
-CGO_ENABLED=0 go build -mod=vendor github.com/ziyan/gatewaysshd
-objcopy --strip-all gatewaysshd
+With docker (a distroless image, the binary is the entrypoint):
 
-# build docker image
-docker build -t ziyan/gatewaysshd .
+```
+$ docker build -t ziyan/gatewaysshd .
 ```
 
+Or build from source (Go 1.25+):
+
+```
+$ git clone https://github.com/ziyan/gatewaysshd.git
+$ cd gatewaysshd
+$ make build
+```
+
+## Quick start
+
+1. **Create a certificate authority and keys.** Follow [SSH.md](SSH.md) for
+   the full walkthrough — generate a CA key, a signed host certificate for
+   the gateway, and a signed user certificate for each client.
+
+2. **Start postgres.** The gateway stores users in a postgres database:
+
+   ```
+   $ docker run -d --name gatewaysshd-db \
+       -e POSTGRES_DB=gatewaysshd \
+       -e POSTGRES_USER=gatewaysshd \
+       -e POSTGRES_PASSWORD=gatewaysshd \
+       -p 5432:5432 postgres
+   ```
+
+3. **Run the gateway:**
+
+   ```
+   $ gatewaysshd \
+       --listen-ssh :2020 \
+       --listen-http 127.0.0.1:2080 \
+       --ca-public-key id_rsa.ca.pub \
+       --host-private-key id_rsa.gateway \
+       --host-public-key id_rsa.gateway-cert.pub \
+       --geoip-database geoip.mmdb
+   ```
+
+   Run `gatewaysshd --help` for the full list of flags, including postgres
+   connection settings, idle timeout, and the debug endpoint.
+
+4. **Connect a client:**
+
+   ```
+   $ ssh -i ~/.ssh/id_rsa.alice -p 2020 alice@gateway -R web:80:localhost:80
+   ```
+
+## The built-in shell
+
+Connecting without a command drops you into a small shell:
+
+```
+$ ssh -p 2020 alice@gateway
+Welcome to gatewaysshd version 0.4.0! Type "help" to get a list of available commands.
+gatewaysshd> status
+gatewaysshd> listUsers
+gatewaysshd> getUser bob
+gatewaysshd> exit
+```
+
+`status`, `listUsers`, and `getUser` require the `permit-port-forwarding`
+certificate extension; `kickUser` additionally requires the user to be marked
+as an administrator in the database.
+
+## Development
+
+```
+$ make format     # gofmt the tree
+$ make build      # build into build/gatewaysshd
+$ make test       # run tests (spins up a temporary postgres container)
+$ make lint       # golangci-lint
+$ make docker     # build the docker image
+```
+
+Integration tests need docker: `make test` launches a disposable postgres
+container and points the test suite at it via `GATEWAYSSHD_TEST_DATABASE_HOST`.
+Without that variable, database-backed tests skip and the rest of the suite
+still runs.
+
+## Contributing
+
+- Commit messages follow [conventional commits](https://www.conventionalcommits.org/)
+  (`feat: …`, `fix: …`); the release bot derives the next version from them.
+- Every pull request description includes a changelog block (pre-filled by
+  the PR template). On each release, the bot collects the blocks of all
+  merged PRs into [CHANGELOG.md](CHANGELOG.md). Apply the `skip-changelog`
+  label if your change has no user-visible effect.
+- Releases are fully automated: merging to `master` triggers the release
+  bot, which versions, updates the changelog, tags, and publishes binaries.
+
+## License
+
+[MIT](LICENSE)
