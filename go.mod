@@ -6,7 +6,7 @@ require (
 	github.com/gorilla/mux v1.8.1
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/op/go-logging v0.0.0-20160315200505-970db520ece7
-	github.com/oschwald/geoip2-golang/v2 v2.1.0
+	github.com/oschwald/geoip2-golang/v2 v2.2.0
 	github.com/segmentio/ksuid v1.0.4
 	github.com/urfave/cli/v3 v3.10.1
 	golang.org/x/crypto v0.53.0
@@ -21,7 +21,7 @@ require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
-	github.com/oschwald/maxminddb-golang/v2 v2.1.1 // indirect
+	github.com/oschwald/maxminddb-golang/v2 v2.4.1 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect

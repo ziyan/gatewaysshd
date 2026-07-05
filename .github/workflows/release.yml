@@ -60,7 +60,7 @@ jobs:
           COMMIT="${GITHUB_SHA}"
           mkdir -p dist
 
-          go build -mod=readonly \
+          go build -mod=vendor \
             -ldflags "-s -w -X main.Version=${VERSION} -X main.Commit=${COMMIT}" \
             -o "dist/gatewaysshd${{ matrix.extension }}" .
 

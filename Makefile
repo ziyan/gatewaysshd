@@ -22,14 +22,14 @@ check:
 # compile
 .PHONY: generate
 generate:
-	@CGO_ENABLED=0 go generate -mod=readonly ./...
+	@CGO_ENABLED=0 go generate -mod=vendor ./...
 
 .PHONY: build
 build: gatewaysshd
 
 gatewaysshd: $(shell find . -iname '*.go') generate
 	mkdir -p ${BUILD_DIR}
-	CGO_ENABLED=0 go build -mod=readonly -o ${BUILD_DIR}/gatewaysshd -ldflags="-X main.Commit=$$(git describe --match=NeVeRmAtCh --always --abbrev=40 --dirty)" .
+	CGO_ENABLED=0 go build -mod=vendor -o ${BUILD_DIR}/gatewaysshd -ldflags="-X main.Commit=$$(git describe --match=NeVeRmAtCh --always --abbrev=40 --dirty)" .
 	objcopy --strip-all ${BUILD_DIR}/gatewaysshd
 
 # run lint
@@ -39,7 +39,6 @@ lint:
 	if ! hash golangci-lint >/dev/null 2>&1; then \
 		go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2; \
 	fi; \
-	go mod download; \
 	golangci-lint cache clean; \
 	golangci-lint run
 
@@ -53,7 +52,7 @@ lint-mulint:
 	REPORT_DIR="$$(mktemp -d -t mulint_reports.XXXXXX)"; \
 	trap 'rm -rf "$$REPORT_DIR"' EXIT; \
 	MULINT_REPORT_DIR="$$REPORT_DIR" MULINT_CONFIG="$$(pwd)/mulint.yaml" \
-		go vet -vettool="$$(command -v mulint)" -mod=readonly ./...
+		go vet -vettool="$$(command -v mulint)" -mod=vendor ./...
 
 # run tests
 .PHONY: test
@@ -79,14 +78,14 @@ test: generate
 		IP="$$(docker inspect --format '{{ range .NetworkSettings.Networks }}{{ .IPAddress }}{{ end }}' $${CONTAINER})"; \
 		export GATEWAYSSHD_TEST_DATABASE_HOST="$${IP}"; \
 	fi; \
-	gotestsum --format testname -- -mod=readonly -race -coverpkg=./... -coverprofile=${BUILD_DIR}/coverage.out ./...; \
+	gotestsum --format testname -- -mod=vendor -race -coverpkg=./... -coverprofile=${BUILD_DIR}/coverage.out ./...; \
 	go tool cover -html=${BUILD_DIR}/coverage.out -o ${BUILD_DIR}/coverage.html; \
 	go tool cover -func=${BUILD_DIR}/coverage.out
 
 # benchmark tests
 .PHONY: benchmark
 benchmark:
-	@go test -mod=readonly -bench=. ./...
+	@go test -mod=vendor -bench=. ./...
 
 # watch for code change and compile
 .PHONY: watch
