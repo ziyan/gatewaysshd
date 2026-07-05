@@ -98,10 +98,8 @@ watch:
 	done
 # make docker image
 .PHONY: docker
-docker: build
-	@mkdir -p ${BUILD_DIR}
-	@cp Dockerfile ${BUILD_DIR}
-	@docker build -t ${DOCKER_TAG} ${BUILD_DIR}
+docker:
+	@docker build --build-arg COMMIT=$$(git describe --match=NeVeRmAtCh --always --abbrev=40 --dirty) -t ${DOCKER_TAG} .
 
 # generate static documents
 .PHONY: docs

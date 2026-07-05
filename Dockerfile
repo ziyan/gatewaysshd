@@ -1,3 +1,21 @@
+FROM --platform=$BUILDPLATFORM golang:1.25 AS builder
+
+ARG TARGETOS
+ARG TARGETARCH
+ARG VERSION
+ARG COMMIT
+
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -mod=readonly \
+    -ldflags "-s -w ${VERSION:+-X main.Version=${VERSION}} ${COMMIT:+-X main.Commit=${COMMIT}}" \
+    -o /out/gatewaysshd .
+
 FROM gcr.io/distroless/static-debian13:nonroot
 
 # the distroless nonroot base does not default the working directory to /, so
@@ -6,6 +24,6 @@ FROM gcr.io/distroless/static-debian13:nonroot
 # deployments mount those files at the container root.
 WORKDIR /
 
-COPY gatewaysshd /bin/gatewaysshd
+COPY --from=builder /out/gatewaysshd /bin/gatewaysshd
 
 ENTRYPOINT ["/bin/gatewaysshd"]

@@ -70,7 +70,15 @@ users, their reported status, and their geolocation in postgres.
 Prebuilt binaries for linux, macOS, and windows are on the
 [releases page](https://github.com/ziyan/gatewaysshd/releases).
 
-With docker (a distroless image, the binary is the entrypoint):
+With docker (a distroless image, the binary is the entrypoint; amd64 and
+arm64 images are published to
+[Docker Hub](https://hub.docker.com/r/ziyan/gatewaysshd) on every release):
+
+```
+$ docker pull ziyan/gatewaysshd
+```
+
+Or build the image yourself:
 
 ```
 $ docker build -t ziyan/gatewaysshd .
