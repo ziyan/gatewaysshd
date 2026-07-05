@@ -1,2 +1,6 @@
 .git
 build
+gatewaysshd*
+tmp
+data
+id_rsa*
