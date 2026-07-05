@@ -10,6 +10,22 @@ requests.
 
 
 
+
+## 0.7.0 (2026-07-05)
+
+### Added
+
+- Release docker images (linux/amd64, linux/arm64) are now published to [docker.io/ziyan/gatewaysshd](https://hub.docker.com/r/ziyan/gatewaysshd), tagged with the release version and `latest`. (#10)
+
+<details>
+<summary>Commit summary (auto-generated)</summary>
+
+### Features
+
+* **ci:** publish docker image to docker.io/ziyan/gatewaysshd on release ([03e7052](https://github.com/ziyan/gatewaysshd/commit/03e7052af614ae09a0d76b1b90591897e7c7b194))
+
+</details>
+
 ## 0.6.1 (2026-07-05)
 
 ### Fixed
