@@ -101,6 +101,44 @@ jobs:
           name: release-${{ matrix.goos }}-${{ matrix.goarch }}
           path: ${{ steps.package.outputs.asset }}
 
+  docker:
+    name: Publish docker image
+    runs-on: ubuntu-latest
+    # only tag pushes carry a version; skip plain workflow_dispatch runs
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: metadata
+        uses: docker/metadata-action@v5
+        with:
+          images: docker.io/ziyan/gatewaysshd
+          tags: |
+            type=semver,pattern={{version}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.metadata.outputs.version }}
+            COMMIT=${{ github.sha }}
+
   release:
     name: Publish release
     runs-on: ubuntu-latest
