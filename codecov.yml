@@ -1,0 +1,6 @@
+# the project status compares total coverage against the base commit with
+# zero tolerance, so it fails PRs that touch no code; keep only the patch
+# status, which checks coverage of the lines changed in the PR itself.
+coverage:
+  status:
+    project: off
