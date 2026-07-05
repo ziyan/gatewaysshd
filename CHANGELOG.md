@@ -9,6 +9,22 @@ requests.
 
 
 
+
+## 0.6.1 (2026-07-05)
+
+### Fixed
+
+- Set `WORKDIR /` in the Docker image so the daemon's relative default file paths resolve against container-root mounts (regression from the busybox→distroless switch) (#9)
+
+<details>
+<summary>Commit summary (auto-generated)</summary>
+
+### Bug Fixes
+
+* **docker:** set WORKDIR / so relative default paths resolve on distroless ([8ec168f](https://github.com/ziyan/gatewaysshd/commit/8ec168f0d929241b85e5d779b4c43ff8154cca3c))
+
+</details>
+
 ## 0.6.0 (2026-07-05)
 
 ### Added
