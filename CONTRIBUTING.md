@@ -42,12 +42,20 @@ rest of the suite still runs.
   `feat: …`, `fix: …`, `chore: …`, etc. The release bot derives the next
   version from them (`feat` → minor, `fix` → patch; major bumps are never
   inferred).
-- The PR template contains a **changelog block**. Fill it in with one bullet
-  per user-visible change, under the matching Keep-a-Changelog section
-  (`### Added`, `### Changed`, `### Fixed`, …). If your change has no
-  user-visible effect (CI tweaks, docs, internal refactors), apply the
-  `skip-changelog` label instead — CI fails production-code PRs that have
-  neither.
+- The PR template contains a **changelog block** delimited by
+  `<!-- changelog:start -->` / `<!-- changelog:end -->` markers; CI locates
+  the block by those markers, so keep them. Fill it in with one bullet per
+  user-visible change, under the matching Keep-a-Changelog section
+  (`### Added`, `### Changed`, `### Fixed`, …), and replace the placeholder
+  heading and bullet. If your change has no user-visible effect (CI tweaks,
+  docs, internal refactors), apply the `skip-changelog` label instead — CI
+  fails production-code PRs that have neither.
+- Opening a PR outside the GitHub web UI (e.g. `gh pr create --body`)
+  bypasses the template — copy the changelog block, markers included, from
+  [.github/pull_request_template.md](.github/pull_request_template.md).
+- The `Changelog` check reads the description from the event that triggered
+  CI, and description edits alone do not re-trigger it. After fixing the
+  block, push a commit or close and reopen the PR to re-run the check.
 
 ## Releases
 
