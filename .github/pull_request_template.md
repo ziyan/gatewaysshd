@@ -29,6 +29,15 @@ The release bot reads each merged PR's block and writes the next
 
 If this PR has no user-visible change (CI tweak, docs typo, internal-only
 refactor), apply the `skip-changelog` label.
+
+Keep the changelog:start / changelog:end markers — CI locates the block
+by them. If you write the description outside the GitHub web UI (e.g.
+`gh pr create --body`), this template is NOT applied automatically: copy
+this whole block, markers included, into your description.
+
+The Changelog check reads the description from the event that triggered
+CI; editing the description alone does not re-run it. After fixing the
+block, push a commit or close and reopen the PR.
 -->
 
 ### Added | Changed | Deprecated | Removed | Fixed | Security
