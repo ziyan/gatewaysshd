@@ -169,3 +169,44 @@ func TestParseIdleTimeout(t *testing.T) {
 		t.Fatal("expected error for invalid duration")
 	}
 }
+
+func TestParsePostgresPasswordInline(t *testing.T) {
+	if err := runWithFlags(t, []string{"--postgres-password", "hunter2"}, func(command *cli.Command) error {
+		password, err := parsePostgresPassword(command)
+		if err != nil {
+			return err
+		}
+		if password != "hunter2" {
+			t.Fatalf("expected inline password, got %q", password)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("failed to parse postgres password: %s", err)
+	}
+}
+
+func TestParsePostgresPasswordFileTakesPrecedence(t *testing.T) {
+	path := writeTestFile(t, "password", []byte("from-file\n"))
+
+	if err := runWithFlags(t, []string{"--postgres-password", "inline", "--postgres-password-file", path}, func(command *cli.Command) error {
+		password, err := parsePostgresPassword(command)
+		if err != nil {
+			return err
+		}
+		if password != "from-file" {
+			t.Fatalf("expected password from file with trailing newline trimmed, got %q", password)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("failed to parse postgres password: %s", err)
+	}
+}
+
+func TestParsePostgresPasswordFileMissing(t *testing.T) {
+	if err := runWithFlags(t, []string{"--postgres-password-file", "/nonexistent/password"}, func(command *cli.Command) error {
+		_, err := parsePostgresPassword(command)
+		return err
+	}); err == nil {
+		t.Fatal("expected error for missing password file")
+	}
+}

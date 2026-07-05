@@ -113,11 +113,16 @@ func run(ctx context.Context, command *cli.Command) error {
 	if pgPort > 65535 {
 		return fmt.Errorf("cli: postgres port %d is out of range (max 65535)", pgPort)
 	}
+	postgresPassword, err := parsePostgresPassword(command)
+	if err != nil {
+		log.Errorf("failed to read postgres password from file \"%s\": %s", command.String("postgres-password-file"), err)
+		return err
+	}
 	databaseSettings := &db.Settings{
 		Host:         command.String("postgres-host"),
 		Port:         uint16(pgPort),
 		User:         command.String("postgres-user"),
-		Password:     command.String("postgres-password"),
+		Password:     postgresPassword,
 		DatabaseName: command.String("postgres-dbname"),
 		SSLMode:      command.String("postgres-sslmode"),
 	}

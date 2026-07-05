@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/urfave/cli/v3"
@@ -94,6 +95,11 @@ var flags = []cli.Flag{
 		Name:  "postgres-password",
 		Value: "gatewaysshd",
 		Usage: "password to authenticate with postgres database",
+	},
+	&cli.StringFlag{
+		Name:  "postgres-password-file",
+		Value: "",
+		Usage: "path to file containing the postgres password, takes precedence over postgres-password",
 	},
 	&cli.StringFlag{
 		Name:  "postgres-dbname",
@@ -225,4 +231,18 @@ func parseHostSigner(command *cli.Command) (ssh.Signer, error) {
 
 func parseIdleTimeout(command *cli.Command) (time.Duration, error) {
 	return time.ParseDuration(command.String("idle-timeout"))
+}
+
+// parsePostgresPassword prefers the password file over the inline flag so the
+// secret can stay out of process arguments
+func parsePostgresPassword(command *cli.Command) (string, error) {
+	path := command.String("postgres-password-file")
+	if path == "" {
+		return command.String("postgres-password"), nil
+	}
+	raw, err := os.ReadFile(path) // #nosec G304 - operator-supplied password path
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(string(raw), "\r\n"), nil
 }
