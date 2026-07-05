@@ -8,6 +8,22 @@ requests.
 <!-- changelog:insert-here -->
 
 
+
+## 0.6.0 (2026-07-05)
+
+### Added
+
+- `--postgres-password-file` flag to supply the postgres password from a file instead of a command-line argument. (#7)
+
+<details>
+<summary>Commit summary (auto-generated)</summary>
+
+### Features
+
+* **cli:** allow postgres password to be supplied via file ([4655f1a](https://github.com/ziyan/gatewaysshd/commit/4655f1ae8e306f52628206f4df39d31cede859e3))
+
+</details>
+
 ## 0.5.0 (2026-07-04)
 
 ### Added
