@@ -22,6 +22,21 @@ import (
 
 var log = logging.MustGetLogger("db")
 
+const (
+	// pooled connections kept warm; establishing a connection through a peer
+	// tunnel costs several cross-region roundtrips (tcp, ssh handshake, tls,
+	// postgres auth), so the default pool of two idle connections makes
+	// bursty hot paths pay that setup cost over and over
+	maxIdleConnections = 8
+
+	// upper bound of connections each node opens, keeping its footprint on
+	// the shared postgres predictable; bursts queue on the pool instead
+	maxOpenConnections = 16
+
+	// how long an idle pooled connection is kept before being closed
+	connectionMaxIdleTime = 5 * time.Minute
+)
+
 type Database interface {
 	// migrate database schema
 	Migrate(context.Context) error
@@ -117,6 +132,13 @@ func Open(settings *Settings) (Database, error) {
 	if err != nil {
 		return nil, err
 	}
+	sqlDatabase, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
+	sqlDatabase.SetMaxIdleConns(maxIdleConnections)
+	sqlDatabase.SetMaxOpenConns(maxOpenConnections)
+	sqlDatabase.SetConnMaxIdleTime(connectionMaxIdleTime)
 	self.db = db.Debug()
 	return self, nil
 }
