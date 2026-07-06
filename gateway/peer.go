@@ -64,10 +64,10 @@ func (self *peer) close() {
 	})
 }
 
-// register this node in the database so other nodes can discover it. forceTime
-// stamps OnlineAt unconditionally, used at startup so a restart after an
-// unclean shutdown (row still Online=true) still records the new online time.
-func (self *gateway) registerNode(ctx context.Context, online, forceTime bool) error {
+// register this node in the database so other nodes can discover it. OnlineAt
+// is refreshed on every heartbeat while online, so peers can tell a live node
+// from one that crashed while its row still says Online=true.
+func (self *gateway) registerNode(ctx context.Context, online bool) error {
 	if self.settings.NodeID == "" {
 		return nil
 	}
@@ -79,17 +79,20 @@ func (self *gateway) registerNode(ctx context.Context, online, forceTime bool) e
 	if _, err := self.database.PutNode(ctx, self.settings.NodeID, func(node *db.Node) error {
 		node.Address = self.settings.NodeAddress
 		node.HostPublicKey = hostPublicKey
-		// OnlineAt marks when the online state last changed, so only stamp it on
-		// a transition (or when forced at startup) instead of every heartbeat
-		if forceTime || node.Online != online || node.OnlineAt.IsZero() {
-			node.OnlineAt = now
-		}
 		node.Online = online
+		node.OnlineAt = now
 		return nil
 	}); err != nil {
 		return err
 	}
 	return nil
+}
+
+// isNodeOnline reports whether a node registration is live: marked online and
+// heartbeat fresh. A crashed node cannot mark itself offline, so a stale
+// heartbeat means dead, keeping peers from redialing it forever.
+func isNodeOnline(node *db.Node) bool {
+	return node.Online && !node.OnlineAt.IsZero() && time.Since(node.OnlineAt) < onlineStaleThreshold
 }
 
 // discover other online nodes from the database and connect to them
@@ -103,7 +106,7 @@ func (self *gateway) discoverPeers(ctx context.Context) error {
 	}
 
 	for _, node := range nodes {
-		if !node.Online || node.Address == "" || node.ID == self.settings.NodeID {
+		if !isNodeOnline(node) || node.Address == "" || node.ID == self.settings.NodeID {
 			continue // cannot connect
 		}
 		if self.getPeer(node.ID) != nil {
@@ -182,7 +185,7 @@ func (self *gateway) runPeers(ctx context.Context) {
 		case <-self.done:
 			return
 		case <-time.After(interval):
-			if err := self.registerNode(ctx, true, false); err != nil {
+			if err := self.registerNode(ctx, true); err != nil {
 				log.Warningf("failed to register node: %s", err)
 			}
 			if err := self.discoverPeers(ctx); err != nil {

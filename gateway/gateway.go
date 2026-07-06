@@ -21,9 +21,10 @@ const (
 	// how often each node refreshes online_at for its connected users
 	onlineHeartbeatInterval = 30 * time.Second
 
-	// how long after the last heartbeat a user still counts as online; must be
-	// larger than onlineHeartbeatInterval so a user stays online between beats,
-	// and bounds how long a crashed node keeps its users appearing online
+	// how long after the last heartbeat a user or node still counts as online;
+	// must be comfortably larger than the heartbeat intervals (onlineHeartbeatInterval
+	// for users, PeerDiscoveryInterval for nodes), and bounds how long a crashed
+	// node keeps itself and its users appearing online
 	onlineStaleThreshold = 90 * time.Second
 )
 
@@ -51,7 +52,9 @@ type Settings struct {
 	// refuses postgres tunnels
 	PostgresAddress string
 
-	// how often to look for new peer nodes, defaults to 15 seconds
+	// how often to look for new peer nodes and refresh this node's online
+	// heartbeat, defaults to 15 seconds; must stay well below
+	// onlineStaleThreshold or other nodes will consider this node dead
 	PeerDiscoveryInterval time.Duration
 }
 
@@ -99,7 +102,7 @@ func Open(database db.Database, sshConfig *ssh.ServerConfig, settings *Settings)
 		done:             make(chan struct{}),
 	}
 	if settings.NodeID != "" {
-		if err := self.registerNode(context.Background(), true, true); err != nil {
+		if err := self.registerNode(context.Background(), true); err != nil {
 			return nil, err
 		}
 		self.waitGroup.Add(1)
@@ -135,7 +138,7 @@ func (self *gateway) Close() {
 	self.waitGroup.Wait()
 
 	// mark this node as offline in the database
-	if err := self.registerNode(context.Background(), false, false); err != nil {
+	if err := self.registerNode(context.Background(), false); err != nil {
 		log.Warningf("failed to mark node as offline: %s", err)
 	}
 }
@@ -337,10 +340,10 @@ func (self *gateway) gatherStatus(user string) map[string]interface{} {
 	}
 }
 
-// isOnline reports whether the user's online_at is fresh enough to count as
-// online. online_at is refreshed on a heartbeat by whichever node the user is
-// connected to, so this is mesh-wide.
-func isOnline(user *db.User) bool {
+// isUserOnline reports whether the user's online_at is fresh enough to count
+// as online. online_at is refreshed on a heartbeat by whichever node the user
+// is connected to, so this is mesh-wide.
+func isUserOnline(user *db.User) bool {
 	return !user.OnlineAt.IsZero() && time.Since(user.OnlineAt) < onlineStaleThreshold
 }
 
@@ -392,7 +395,7 @@ func (self *gateway) ListUsers(ctx context.Context) (interface{}, error) {
 	}
 	for _, user := range users {
 		user.Status = nil
-		user.Online = isOnline(user)
+		user.Online = isUserOnline(user)
 	}
 	return map[string]interface{}{
 		"users": users,
@@ -443,7 +446,7 @@ func (self *gateway) GetUser(ctx context.Context, userId string) (interface{}, e
 	}()
 
 	// online if connected here or seen recently on any node in the mesh
-	user.Online = len(connections) > 0 || isOnline(user)
+	user.Online = len(connections) > 0 || isUserOnline(user)
 	user.Connections = connections
 
 	return map[string]interface{}{

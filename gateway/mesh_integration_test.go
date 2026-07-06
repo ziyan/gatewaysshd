@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"io"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -409,6 +410,9 @@ func TestGatewayNodeRegistration(t *testing.T) {
 	if node == nil || !node.Online || node.Address != address || node.HostPublicKey == "" {
 		t.Fatalf("unexpected node registration: %+v", node)
 	}
+	if time.Since(node.OnlineAt) > time.Minute {
+		t.Fatalf("expected a fresh online heartbeat, got %s", node.OnlineAt)
+	}
 
 	releaseNode()
 
@@ -418,6 +422,75 @@ func TestGatewayNodeRegistration(t *testing.T) {
 	}
 	if node == nil || node.Online {
 		t.Fatalf("expected node to be offline after close, got %+v", node)
+	}
+}
+
+// TestGatewayDiscoverySkipsCrashedNodes proves a node whose row still says
+// online but whose heartbeat went stale is not dialed: a crashed node cannot
+// mark itself offline, so peers must age it out instead of redialing forever.
+func TestGatewayDiscoverySkipsCrashedNodes(t *testing.T) {
+	t.Parallel()
+	database, release := dbtest.AcquireDatabase(t)
+	defer release()
+
+	// a listener that counts connection attempts and closes them right away
+	countingListener := func() (string, *atomic.Int32, func()) {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("failed to listen: %s", err)
+		}
+		var count atomic.Int32
+		go func() {
+			defer deferutil.Recover()
+			for {
+				socket, err := listener.Accept()
+				if err != nil {
+					return
+				}
+				count.Add(1)
+				_ = socket.Close()
+			}
+		}()
+		return listener.Addr().String(), &count, func() { _ = listener.Close() }
+	}
+	freshAddress, freshCount, closeFresh := countingListener()
+	defer closeFresh()
+	crashedAddress, crashedCount, closeCrashed := countingListener()
+	defer closeCrashed()
+
+	// seed one node with a fresh heartbeat and one whose heartbeat went stale
+	seedNode := func(nodeId, address string, onlineAt time.Time) {
+		hostPublicKey := string(ssh.MarshalAuthorizedKey(newTestSigner(t).PublicKey()))
+		if _, err := database.PutNode(t.Context(), nodeId, func(node *db.Node) error {
+			node.Address = address
+			node.HostPublicKey = hostPublicKey
+			node.Online = true
+			node.OnlineAt = onlineAt
+			return nil
+		}); err != nil {
+			t.Fatalf("failed to seed node %s: %s", nodeId, err)
+		}
+	}
+	seedNode("node-fresh", freshAddress, time.Now())
+	seedNode("node-crashed", crashedAddress, time.Now().Add(-5*time.Minute))
+
+	peerCaSigner := newTestSigner(t)
+	userCaSigner := newTestSigner(t)
+	_, _, releaseNode := startTestNode(t, database, userCaSigner, peerCaSigner, "node-a", "")
+	defer releaseNode()
+
+	// wait until the fresh node has been dialed a few times, proving several
+	// discovery cycles have processed both seeded rows
+	deadline := time.Now().Add(10 * time.Second)
+	for freshCount.Load() < 3 {
+		if time.Now().After(deadline) {
+			t.Fatalf("fresh node was only dialed %d times", freshCount.Load())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if count := crashedCount.Load(); count != 0 {
+		t.Fatalf("crashed node was dialed %d times", count)
 	}
 }
 
