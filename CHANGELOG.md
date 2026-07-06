@@ -11,6 +11,43 @@ requests.
 
 
 
+
+## 0.8.0 (2026-07-06)
+
+### Added
+
+- `listOnlineUsers` shell command that lists users currently online across the mesh (#14)
+- Each user record now reports its `nodeId` in the JSON output (#14)
+
+### Changed
+
+- Node liveness is now derived from a heartbeat; upgrade all mesh nodes together, (#14)
+  old-binary nodes do not refresh their heartbeat and will be considered offline (#14)
+- update geoip2 dependencies (geoip2-golang v2.2.0, maxminddb-golang v2.4.1) (#13)
+
+### Fixed
+
+- Crashed nodes now age out of peer discovery instead of being redialed forever (#14)
+- `nodeId` no longer goes stale when a user leaves one node but stays on another (#14)
+
+<details>
+<summary>Commit summary (auto-generated)</summary>
+
+### Bug Fixes
+
+* **auth:** do not mark rejected disabled logins online ([bc2cb69](https://github.com/ziyan/gatewaysshd/commit/bc2cb694039fa4cf96ef4860a2e4d05ecb74fb69))
+* **gateway:** age out crashed nodes from peer discovery ([eb62b41](https://github.com/ziyan/gatewaysshd/commit/eb62b41aca408458047a2b3908b46ab5ed281add))
+* **gateway:** apply self-review findings on mesh online status ([b08214b](https://github.com/ziyan/gatewaysshd/commit/b08214b11ba046b0a9f994a82c85c35abccc26a0))
+* **gateway:** refresh node_id on the online heartbeat to self-heal ([c8aa5ad](https://github.com/ziyan/gatewaysshd/commit/c8aa5ad38c837768d6457475c99bf1369103d61f))
+
+
+### Features
+
+* **gateway:** add listOnlineUsers command and report nodeId per user ([d978c90](https://github.com/ziyan/gatewaysshd/commit/d978c906ec058a81d8668289e381c718d32353d5))
+* **gateway:** make online status mesh-wide via online_at heartbeat ([b4935c5](https://github.com/ziyan/gatewaysshd/commit/b4935c56476851d54fb2ae804978185ec690feb6))
+
+</details>
+
 ## 0.7.0 (2026-07-05)
 
 ### Added
