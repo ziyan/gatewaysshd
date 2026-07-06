@@ -13,6 +13,23 @@ requests.
 
 
 
+
+## 0.9.1 (2026-07-06)
+
+### Changed
+
+- Database connection pool keeps idle connections warm and bounds open (#16)
+  connections, avoiding repeated peer tunnel setup costs on remote nodes (#16)
+
+<details>
+<summary>Commit summary (auto-generated)</summary>
+
+### Performance Improvements
+
+* **db:** keep the connection pool warm and bounded ([e565ac0](https://github.com/ziyan/gatewaysshd/commit/e565ac07652f6728cd14bbc251b3eb46fc5946c2))
+
+</details>
+
 ## 0.9.0 (2026-07-06)
 
 ### Added
