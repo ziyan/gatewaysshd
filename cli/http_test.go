@@ -29,6 +29,10 @@ func (self *fakeGateway) ListOnlineUsers(context.Context) (interface{}, error) {
 	return map[string]interface{}{"users": []string{"alice"}}, nil
 }
 
+func (self *fakeGateway) ListLocalOnlineUsers(context.Context) (interface{}, error) {
+	return map[string]interface{}{"users": []string{"alice"}}, nil
+}
+
 func (self *fakeGateway) GetUser(ctx context.Context, userId string) (interface{}, error) {
 	user, ok := self.users[userId]
 	if !ok {

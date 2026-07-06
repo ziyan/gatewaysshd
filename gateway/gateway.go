@@ -69,6 +69,7 @@ type Gateway interface {
 
 	ListUsers(context.Context) (interface{}, error)
 	ListOnlineUsers(context.Context) (interface{}, error)
+	ListLocalOnlineUsers(context.Context) (interface{}, error)
 	GetUser(context.Context, string) (interface{}, error)
 	GetUserScreenshot(context.Context, string) ([]byte, error)
 }
@@ -241,21 +242,21 @@ func (self *gateway) lookupRemotePeer(ctx context.Context, host string) *peer {
 		if user == "" {
 			continue
 		}
-		model, err := self.database.GetUser(ctx, user)
+		nodeId, err := self.database.GetUserNodeID(ctx, user)
 		if err != nil {
 			// a transient error on one candidate must not abort resolving the
 			// remaining, more-specific user suffixes
 			log.Warningf("failed to look up user %q for mesh tunneling: %s", user, err)
 			continue
 		}
-		if model == nil || model.NodeID == "" || model.NodeID == self.settings.NodeID {
+		if nodeId == "" || nodeId == self.settings.NodeID {
 			continue
 		}
-		if peer := self.getPeer(model.NodeID); peer != nil {
-			log.Debugf("lookup: found remote node for host %q: node = %s", host, model.NodeID)
+		if peer := self.getPeer(nodeId); peer != nil {
+			log.Debugf("lookup: found remote node for host %q: node = %s", host, nodeId)
 			return peer
 		}
-		log.Debugf("lookup: user %q is on node %s but no peer connection is available", user, model.NodeID)
+		log.Debugf("lookup: user %q is on node %s but no peer connection is available", user, nodeId)
 	}
 	return nil
 }
@@ -448,6 +449,20 @@ func (self *gateway) ListOnlineUsers(ctx context.Context) (interface{}, error) {
 	// online status is mesh-wide, derived purely from heartbeat freshness in
 	// sql, which includes users connected to other nodes
 	users, err := self.database.ListOnlineUsers(ctx, time.Now().Add(-onlineStaleThreshold))
+	if err != nil {
+		return nil, err
+	}
+	for _, user := range users {
+		user.Status = nil
+		user.Online = true
+	}
+	return userListResponse(users), nil
+}
+
+func (self *gateway) ListLocalOnlineUsers(ctx context.Context) (interface{}, error) {
+	// only the users connected to this node, taken from the live connection
+	// index, so a single id-set query fetches their records
+	users, err := self.database.GetUsers(ctx, self.connectedUserIds())
 	if err != nil {
 		return nil, err
 	}

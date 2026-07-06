@@ -401,6 +401,13 @@ func TestGatewayListOnlineUsersMeshWide(t *testing.T) {
 	if node, ok := nodes["bob"]; !ok || node != "node-a" {
 		t.Fatalf("expected bob online on node-a, got %+v", nodes)
 	}
+
+	// listLocalOnlineUsers only reports users connected to this node: bob is
+	// on node-a, carol is online mesh-wide but connected to node-b only
+	local := parseUserList(t, bob, "listLocalOnlineUsers")
+	if local.Meta.TotalCount != 1 || local.Users[0].ID != "bob" || !local.Users[0].Online {
+		t.Fatalf("expected only bob connected locally, got %+v", local.Users)
+	}
 }
 
 // TestGatewayReleasesUserNodeOnDisconnect proves the user's node_id is
