@@ -362,7 +362,7 @@ func (self *gateway) ListOnlineUsers(ctx context.Context) (interface{}, error) {
 	for id := range online {
 		ids = append(ids, id)
 	}
-	users, err := self.database.ListUsersByIDs(ctx, ids)
+	users, err := self.database.GetUsers(ctx, ids)
 	if err != nil {
 		return nil, err
 	}

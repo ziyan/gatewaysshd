@@ -30,7 +30,7 @@ type Database interface {
 	Close() error
 
 	ListUsers(context.Context) ([]*User, error)
-	ListUsersByIDs(context.Context, []string) ([]*User, error)
+	GetUsers(context.Context, []string) ([]*User, error)
 	GetUser(context.Context, string) (*User, error)
 	PutUser(context.Context, string, func(*User) error) (*User, error)
 

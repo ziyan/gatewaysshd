@@ -40,10 +40,10 @@ func (self *database) ListUsers(ctx context.Context) ([]*User, error) {
 	return results, nil
 }
 
-// ListUsersByIDs returns only the users with the given ids, filtered in sql, so
+// GetUsers returns only the users with the given ids, filtered in sql, so
 // callers that already know the subset (e.g. currently-online users) do not
 // load the whole table.
-func (self *database) ListUsersByIDs(ctx context.Context, ids []string) ([]*User, error) {
+func (self *database) GetUsers(ctx context.Context, ids []string) ([]*User, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}

@@ -158,7 +158,7 @@ func TestListUsersOmitsHeavyColumns(t *testing.T) {
 	}
 }
 
-func TestListUsersByIDs(t *testing.T) {
+func TestGetUsers(t *testing.T) {
 	t.Parallel()
 	database, release := dbtest.AcquireDatabase(t)
 	defer release()
@@ -173,12 +173,12 @@ func TestListUsersByIDs(t *testing.T) {
 	}
 
 	// empty id set returns nothing without touching the table
-	if got, err := database.ListUsersByIDs(t.Context(), nil); err != nil || got != nil {
+	if got, err := database.GetUsers(t.Context(), nil); err != nil || got != nil {
 		t.Fatalf("expected nil for empty ids, got %+v err %v", got, err)
 	}
 
 	// only the requested (existing) ids come back, with node_id populated
-	got, err := database.ListUsersByIDs(t.Context(), []string{"alice", "carol", "missing"})
+	got, err := database.GetUsers(t.Context(), []string{"alice", "carol", "missing"})
 	if err != nil {
 		t.Fatalf("failed to list by ids: %s", err)
 	}
