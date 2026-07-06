@@ -31,9 +31,14 @@ type Database interface {
 
 	ListUsers(context.Context) ([]*User, error)
 	ListOnlineUsers(context.Context, time.Time) ([]*User, error)
+	GetUsers(context.Context, []string) ([]*User, error)
 	MarkUsersOnline(context.Context, []string, string, time.Duration) error
 	ClearUserNodeID(context.Context, string, string) error
 	GetUser(context.Context, string) (*User, error)
+	GetUserNodeID(context.Context, string) (string, error)
+	UpsertUserOnConnect(context.Context, string, string, Location, string) (*User, error)
+	UpdateUserStatus(context.Context, string, Status) error
+	UpdateUserScreenshot(context.Context, string, []byte) error
 	PutUser(context.Context, string, func(*User) error) (*User, error)
 
 	ListNodes(context.Context) ([]*Node, error)

@@ -229,6 +229,163 @@ func TestMarkUsersOnlineAndListOnlineUsers(t *testing.T) {
 	}
 }
 
+func TestUpsertUserOnConnect(t *testing.T) {
+	t.Parallel()
+	database, release := dbtest.AcquireDatabase(t)
+	defer release()
+
+	location := db.Location{Country: "JP", City: "Tokyo"}
+
+	// first connect creates the user with presence
+	user, err := database.UpsertUserOnConnect(t.Context(), "alice", "203.0.113.7", location, "node-a")
+	if err != nil {
+		t.Fatalf("failed to upsert new user: %s", err)
+	}
+	if user.Administrator || user.Disabled {
+		t.Fatalf("expected fresh flags, got %+v", user)
+	}
+	created, err := database.GetUser(t.Context(), "alice")
+	if err != nil || created == nil {
+		t.Fatalf("failed to get created user: %+v err %v", created, err)
+	}
+	if created.IP != "203.0.113.7" || created.Location != location || created.NodeID != "node-a" || created.OnlineAt.IsZero() {
+		t.Fatalf("unexpected created user: %+v", created)
+	}
+
+	// reconnect on another node refreshes presence and reports existing flags
+	if _, err := database.PutUser(t.Context(), "alice", func(model *db.User) error {
+		model.Administrator = true
+		return nil
+	}); err != nil {
+		t.Fatalf("failed to promote user: %s", err)
+	}
+	user, err = database.UpsertUserOnConnect(t.Context(), "alice", "203.0.113.8", location, "node-b")
+	if err != nil {
+		t.Fatalf("failed to upsert existing user: %s", err)
+	}
+	if !user.Administrator {
+		t.Fatal("expected administrator flag to be returned")
+	}
+	updated, err := database.GetUser(t.Context(), "alice")
+	if err != nil {
+		t.Fatalf("failed to get updated user: %s", err)
+	}
+	if updated.IP != "203.0.113.8" || updated.NodeID != "node-b" {
+		t.Fatalf("expected refreshed presence, got %+v", updated)
+	}
+	if !updated.CreatedAt.Equal(created.CreatedAt) {
+		t.Fatalf("expected creation time to be preserved, got %s != %s", updated.CreatedAt, created.CreatedAt)
+	}
+
+	// a disabled user's rejected login refreshes ip but not presence
+	if _, err := database.PutUser(t.Context(), "mallory", func(model *db.User) error {
+		model.Disabled = true
+		return nil
+	}); err != nil {
+		t.Fatalf("failed to create disabled user: %s", err)
+	}
+	user, err = database.UpsertUserOnConnect(t.Context(), "mallory", "198.51.100.9", location, "node-a")
+	if err != nil {
+		t.Fatalf("failed to upsert disabled user: %s", err)
+	}
+	if !user.Disabled {
+		t.Fatal("expected disabled flag to be returned")
+	}
+	rejected, err := database.GetUser(t.Context(), "mallory")
+	if err != nil {
+		t.Fatalf("failed to get disabled user: %s", err)
+	}
+	if rejected.IP != "198.51.100.9" {
+		t.Fatalf("expected ip to be recorded for audit, got %q", rejected.IP)
+	}
+	if rejected.NodeID != "" || !rejected.OnlineAt.IsZero() {
+		t.Fatalf("expected no presence for disabled user, got %+v", rejected)
+	}
+}
+
+func TestUpdateUserStatusAndScreenshot(t *testing.T) {
+	t.Parallel()
+	database, release := dbtest.AcquireDatabase(t)
+	defer release()
+
+	if _, err := database.UpsertUserOnConnect(t.Context(), "alice", "203.0.113.7", db.Location{}, "node-a"); err != nil {
+		t.Fatalf("failed to create user: %s", err)
+	}
+
+	if err := database.UpdateUserStatus(t.Context(), "alice", db.Status(`{"healthy":true}`)); err != nil {
+		t.Fatalf("failed to update status: %s", err)
+	}
+	if err := database.UpdateUserScreenshot(t.Context(), "alice", []byte{0x89, 0x50}); err != nil {
+		t.Fatalf("failed to update screenshot: %s", err)
+	}
+
+	// both updates are targeted: they must not clobber each other or presence
+	user, err := database.GetUser(t.Context(), "alice")
+	if err != nil {
+		t.Fatalf("failed to get user: %s", err)
+	}
+	var status map[string]bool
+	if err := json.Unmarshal(user.Status, &status); err != nil || !status["healthy"] {
+		t.Fatalf("unexpected status %s: %v", user.Status, err)
+	}
+	if len(user.Screenshot) != 2 {
+		t.Fatalf("unexpected screenshot: %v", user.Screenshot)
+	}
+	if user.IP != "203.0.113.7" || user.NodeID != "node-a" || user.OnlineAt.IsZero() {
+		t.Fatalf("expected other fields untouched, got %+v", user)
+	}
+}
+
+func TestGetUserNodeID(t *testing.T) {
+	t.Parallel()
+	database, release := dbtest.AcquireDatabase(t)
+	defer release()
+
+	// unknown user reads as empty, same as a user without a node
+	if nodeId, err := database.GetUserNodeID(t.Context(), "missing"); err != nil || nodeId != "" {
+		t.Fatalf("expected empty node for missing user, got %q err %v", nodeId, err)
+	}
+
+	if _, err := database.UpsertUserOnConnect(t.Context(), "alice", "203.0.113.7", db.Location{}, "node-a"); err != nil {
+		t.Fatalf("failed to create user: %s", err)
+	}
+	if nodeId, err := database.GetUserNodeID(t.Context(), "alice"); err != nil || nodeId != "node-a" {
+		t.Fatalf("expected node-a, got %q err %v", nodeId, err)
+	}
+}
+
+func TestGetUsers(t *testing.T) {
+	t.Parallel()
+	database, release := dbtest.AcquireDatabase(t)
+	defer release()
+
+	for _, name := range []string{"alice", "bob", "carol"} {
+		if _, err := database.PutUser(t.Context(), name, func(user *db.User) error {
+			return nil
+		}); err != nil {
+			t.Fatalf("failed to create user %s: %s", name, err)
+		}
+	}
+
+	// empty id set returns nothing without touching the table
+	if users, err := database.GetUsers(t.Context(), nil); err != nil || users != nil {
+		t.Fatalf("expected nil for empty ids, got %+v err %v", users, err)
+	}
+
+	// only the requested (existing) ids come back
+	users, err := database.GetUsers(t.Context(), []string{"alice", "carol", "missing"})
+	if err != nil {
+		t.Fatalf("failed to get users: %s", err)
+	}
+	seen := make(map[string]bool)
+	for _, user := range users {
+		seen[user.ID] = true
+	}
+	if len(users) != 2 || !seen["alice"] || !seen["carol"] {
+		t.Fatalf("unexpected subset: %+v", seen)
+	}
+}
+
 func TestClearUserNodeID(t *testing.T) {
 	t.Parallel()
 	database, release := dbtest.AcquireDatabase(t)

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net"
 	"net/netip"
-	"time"
 
 	logging "github.com/op/go-logging"
 	geoip2 "github.com/oschwald/geoip2-golang/v2"
@@ -94,19 +93,11 @@ func (self *authenticator) authenticate(meta ssh.ConnMetadata, publicKey ssh.Pub
 	delete(permissions.Extensions, "peer")
 	delete(permissions.Extensions, "identity")
 
-	// update user in database
-	user, err := self.database.PutUser(context.Background(), meta.User(), func(model *db.User) error {
-		model.IP = ip.String()
-		model.Location = location
-		// presence is only recorded for logins that will be accepted, a
-		// disabled user is rejected right below and must not appear online
-		if !model.Disabled {
-			model.NodeID = self.settings.NodeID
-			// mark online immediately; the gateway heartbeat keeps it fresh
-			model.OnlineAt = time.Now().In(time.Local)
-		}
-		return nil
-	})
+	// update user in database, a single upsert so the authentication path
+	// costs one database roundtrip; presence (node_id, online_at) is only
+	// recorded for logins that will be accepted, a disabled user is rejected
+	// right below and must not appear online
+	user, err := self.database.UpsertUserOnConnect(context.Background(), meta.User(), ip.String(), location, self.settings.NodeID)
 	if err != nil {
 		return nil, err
 	}
