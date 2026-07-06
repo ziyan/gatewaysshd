@@ -378,7 +378,7 @@ func (self *gateway) runOnlineHeartbeat(ctx context.Context) {
 			if len(ids) == 0 {
 				continue
 			}
-			if err := self.database.MarkUsersOnline(ctx, ids, self.settings.NodeID, time.Now()); err != nil {
+			if err := self.database.MarkUsersOnline(ctx, ids, self.settings.NodeID, time.Now().In(time.Local)); err != nil {
 				log.Warningf("failed to refresh online users: %s", err)
 			}
 		}

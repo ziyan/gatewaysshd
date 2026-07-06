@@ -100,7 +100,7 @@ func (self *authenticator) authenticate(meta ssh.ConnMetadata, publicKey ssh.Pub
 		model.Location = location
 		model.NodeID = self.settings.NodeID
 		// mark online immediately; the gateway heartbeat keeps it fresh
-		model.OnlineAt = time.Now()
+		model.OnlineAt = time.Now().In(time.Local)
 		return nil
 	})
 	if err != nil {
