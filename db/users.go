@@ -62,13 +62,18 @@ func (self *database) ListOnlineUsers(ctx context.Context, since time.Time) ([]*
 	return results, nil
 }
 
-// MarkUsersOnline refreshes online_at for the given users, called on a
-// heartbeat by the node they are connected to.
-func (self *database) MarkUsersOnline(ctx context.Context, ids []string, at time.Time) error {
+// MarkUsersOnline refreshes online_at and node_id for the given users, called
+// on a heartbeat by the node they are connected to. Refreshing node_id keeps
+// it pointing at a node the user is currently on, self-healing the stale value
+// left behind when a user leaves the node it last authenticated to.
+func (self *database) MarkUsersOnline(ctx context.Context, ids []string, nodeId string, at time.Time) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	return self.db.WithContext(ctx).Model(&User{}).Where("id IN ?", ids).Update("online_at", at).Error
+	return self.db.WithContext(ctx).Model(&User{}).Where("id IN ?", ids).Updates(map[string]interface{}{
+		"online_at": at,
+		"node_id":   nodeId,
+	}).Error
 }
 
 func (self *database) GetUser(ctx context.Context, userId string) (*User, error) {

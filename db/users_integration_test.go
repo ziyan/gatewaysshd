@@ -175,12 +175,12 @@ func TestMarkUsersOnlineAndListOnlineUsers(t *testing.T) {
 	now := time.Now()
 
 	// empty id set is a no-op
-	if err := database.MarkUsersOnline(t.Context(), nil, now); err != nil {
+	if err := database.MarkUsersOnline(t.Context(), nil, "node-y", now); err != nil {
 		t.Fatalf("expected nil for empty ids, got %v", err)
 	}
 
-	// mark alice and carol online now, bob stays offline
-	if err := database.MarkUsersOnline(t.Context(), []string{"alice", "carol"}, now); err != nil {
+	// mark alice and carol online now on node-y, bob stays offline
+	if err := database.MarkUsersOnline(t.Context(), []string{"alice", "carol"}, "node-y", now); err != nil {
 		t.Fatalf("failed to mark users online: %s", err)
 	}
 
@@ -191,8 +191,9 @@ func TestMarkUsersOnlineAndListOnlineUsers(t *testing.T) {
 	seen := make(map[string]bool)
 	for _, user := range got {
 		seen[user.ID] = true
-		if user.NodeID != "node-x" {
-			t.Fatalf("expected nodeId node-x for %s, got %q", user.ID, user.NodeID)
+		// node_id self-heals to the node that beat the heartbeat
+		if user.NodeID != "node-y" {
+			t.Fatalf("expected nodeId node-y for %s, got %q", user.ID, user.NodeID)
 		}
 		if user.OnlineAt.IsZero() {
 			t.Fatalf("expected onlineAt to be set for %s", user.ID)
