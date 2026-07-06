@@ -95,6 +95,7 @@ func handleConnection(gateway *gateway, conn *ssh.ServerConn, channels <-chan ss
 		defer self.waitGroup.Done()
 		defer func() {
 			self.gateway.deleteConnection(self)
+			self.gateway.releaseUserNode(self.user)
 			if err := self.conn.Close(); err != nil {
 				log.Warningf("%s: failed to close connection: %s", self, err)
 			}

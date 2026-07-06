@@ -26,6 +26,16 @@ type userList struct {
 	} `json:"meta"`
 }
 
+// parseUserList runs a user listing command and parses its JSON output.
+func parseUserList(t *testing.T, client *ssh.Client, command string) userList {
+	t.Helper()
+	var result userList
+	if err := json.Unmarshal([]byte(runCommand(t, client, command)), &result); err != nil {
+		t.Fatalf("failed to parse %s output: %s", command, err)
+	}
+	return result
+}
+
 func runCommand(t *testing.T, client *ssh.Client, command string) string {
 	t.Helper()
 	session, err := client.NewSession()
@@ -309,23 +319,14 @@ func TestGatewayListOnlineUsers(t *testing.T) {
 		_ = bob.Close()
 	}()
 
-	parse := func(command string) userList {
-		t.Helper()
-		var result userList
-		if err := json.Unmarshal([]byte(runCommand(t, bob, command)), &result); err != nil {
-			t.Fatalf("failed to parse %s output: %s", command, err)
-		}
-		return result
-	}
-
 	// listUsers includes both the online (bob) and offline (ghost) users
-	all := parse("listUsers")
+	all := parseUserList(t, bob, "listUsers")
 	if all.Meta.TotalCount != 2 {
 		t.Fatalf("expected listUsers totalCount 2, got %d", all.Meta.TotalCount)
 	}
 
 	// listOnlineUsers returns only bob, with online=true and nodeId set
-	online := parse("listOnlineUsers")
+	online := parseUserList(t, bob, "listOnlineUsers")
 	if online.Meta.TotalCount != 1 {
 		t.Fatalf("expected listOnlineUsers totalCount 1, got %d", online.Meta.TotalCount)
 	}
@@ -373,10 +374,7 @@ func TestGatewayListOnlineUsersMeshWide(t *testing.T) {
 		_ = bob.Close()
 	}()
 
-	var online userList
-	if err := json.Unmarshal([]byte(runCommand(t, bob, "listOnlineUsers")), &online); err != nil {
-		t.Fatalf("failed to parse listOnlineUsers output: %s", err)
-	}
+	online := parseUserList(t, bob, "listOnlineUsers")
 	nodes := make(map[string]string)
 	for _, user := range online.Users {
 		nodes[user.ID] = user.NodeID
@@ -386,5 +384,50 @@ func TestGatewayListOnlineUsersMeshWide(t *testing.T) {
 	}
 	if node, ok := nodes["bob"]; !ok || node != "node-a" {
 		t.Fatalf("expected bob online on node-a, got %+v", nodes)
+	}
+}
+
+// TestGatewayReleasesUserNodeOnDisconnect proves the user's node_id is
+// released when their last connection to the node closes, so a node they are
+// still connected to can adopt them on its next heartbeat.
+func TestGatewayReleasesUserNodeOnDisconnect(t *testing.T) {
+	t.Parallel()
+	database, release := dbtest.AcquireDatabase(t)
+	defer release()
+
+	peerCaSigner := newTestSigner(t)
+	userCaSigner := newTestSigner(t)
+	address, _, releaseNode := startTestNode(t, database, userCaSigner, peerCaSigner, "node-a", "")
+	defer releaseNode()
+
+	extensions := map[string]string{"permit-port-forwarding": ""}
+	bob := dialTestGateway(t, address, newCertSigner(t, userCaSigner, "bob", extensions), "bob")
+	defer func() {
+		_ = bob.Close()
+	}()
+
+	user, err := database.GetUser(t.Context(), "bob")
+	if err != nil || user == nil || user.NodeID != "node-a" {
+		t.Fatalf("expected bob on node-a, got %+v err %v", user, err)
+	}
+
+	if err := bob.Close(); err != nil {
+		t.Fatalf("failed to close connection: %s", err)
+	}
+
+	// the connection teardown that releases node_id is asynchronous
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		user, err := database.GetUser(t.Context(), "bob")
+		if err != nil {
+			t.Fatalf("failed to get user: %s", err)
+		}
+		if user.NodeID == "" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected node_id to be released, still %q", user.NodeID)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }

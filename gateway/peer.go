@@ -92,7 +92,7 @@ func (self *gateway) registerNode(ctx context.Context, online bool) error {
 // heartbeat fresh. A crashed node cannot mark itself offline, so a stale
 // heartbeat means dead, keeping peers from redialing it forever.
 func isNodeOnline(node *db.Node) bool {
-	return node.Online && !node.OnlineAt.IsZero() && time.Since(node.OnlineAt) < onlineStaleThreshold
+	return node.Online && isHeartbeatFresh(node.OnlineAt)
 }
 
 // discover other online nodes from the database and connect to them
@@ -176,6 +176,14 @@ func (self *gateway) runPeers(ctx context.Context) {
 	interval := self.settings.PeerDiscoveryInterval
 	if interval <= 0 {
 		interval = 15 * time.Second
+	}
+	// the discovery interval doubles as the node online heartbeat, so it needs
+	// margin for a missed beat before other nodes consider this node dead
+	if interval > onlineStaleThreshold/3 {
+		log.Warningf(
+			"peer discovery interval %s leaves no heartbeat margin within the %s online threshold, other nodes may consider this node dead",
+			interval, onlineStaleThreshold,
+		)
 	}
 	if err := self.discoverPeers(ctx); err != nil {
 		log.Warningf("failed to discover peers: %s", err)

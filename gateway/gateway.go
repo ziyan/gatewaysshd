@@ -68,6 +68,7 @@ type Gateway interface {
 	ScavengeConnections(time.Duration)
 
 	ListUsers(context.Context) (interface{}, error)
+	ListOnlineUsers(context.Context) (interface{}, error)
 	GetUser(context.Context, string) (interface{}, error)
 	GetUserScreenshot(context.Context, string) ([]byte, error)
 }
@@ -340,32 +341,34 @@ func (self *gateway) gatherStatus(user string) map[string]interface{} {
 	}
 }
 
+// isHeartbeatFresh reports whether an online heartbeat is recent enough to
+// count as online. Heartbeats are stamped with the writing node's clock, so
+// node clocks must be kept in sync (ntp) well within onlineStaleThreshold.
+func isHeartbeatFresh(onlineAt time.Time) bool {
+	return !onlineAt.IsZero() && time.Since(onlineAt) < onlineStaleThreshold
+}
+
 // isUserOnline reports whether the user's online_at is fresh enough to count
 // as online. online_at is refreshed on a heartbeat by whichever node the user
 // is connected to, so this is mesh-wide.
 func isUserOnline(user *db.User) bool {
-	return !user.OnlineAt.IsZero() && time.Since(user.OnlineAt) < onlineStaleThreshold
+	return isHeartbeatFresh(user.OnlineAt)
 }
 
-// connectedUserIds returns the distinct users currently connected to this node.
-// peer connections carry no user and are excluded.
+// connectedUserIds returns the distinct users currently connected to this
+// node. peer connections are indexed under an empty user and excluded.
 func (self *gateway) connectedUserIds() []string {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
-	seen := make(map[string]struct{}, len(self.connectionsList))
-	ids := make([]string, 0, len(self.connectionsList))
-	for _, connection := range self.connectionsList {
-		if connection.user == "" {
+	userIds := make([]string, 0, len(self.connectionsIndex))
+	for userId, connections := range self.connectionsIndex {
+		if userId == "" || len(connections) == 0 {
 			continue
 		}
-		if _, ok := seen[connection.user]; ok {
-			continue
-		}
-		seen[connection.user] = struct{}{}
-		ids = append(ids, connection.user)
+		userIds = append(userIds, userId)
 	}
-	return ids
+	return userIds
 }
 
 // runOnlineHeartbeat periodically refreshes online_at for the users connected
@@ -377,14 +380,47 @@ func (self *gateway) runOnlineHeartbeat(ctx context.Context) {
 		case <-self.done:
 			return
 		case <-time.After(onlineHeartbeatInterval):
-			ids := self.connectedUserIds()
-			if len(ids) == 0 {
+			userIds := self.connectedUserIds()
+			if len(userIds) == 0 {
 				continue
 			}
-			if err := self.database.MarkUsersOnline(ctx, ids, self.settings.NodeID, time.Now().In(time.Local)); err != nil {
+			// bound each beat so a wedged database cannot block this loop, and
+			// with it Close(), forever
+			beatContext, cancel := context.WithTimeout(ctx, onlineHeartbeatInterval)
+			err := self.database.MarkUsersOnline(beatContext, userIds, self.settings.NodeID, onlineStaleThreshold)
+			cancel()
+			if err != nil {
 				log.Warningf("failed to refresh online users: %s", err)
 			}
 		}
+	}
+}
+
+// releaseUserNode clears the user's node_id after their last connection to
+// this node closed, so a node the user is still connected to can adopt them
+// on its next heartbeat instead of mesh tunnels being routed here.
+func (self *gateway) releaseUserNode(userId string) {
+	if self.settings.NodeID == "" || userId == "" {
+		return
+	}
+	self.lock.Lock()
+	remaining := len(self.connectionsIndex[userId])
+	self.lock.Unlock()
+	if remaining > 0 {
+		return
+	}
+	if err := self.database.ClearUserNodeID(context.Background(), userId, self.settings.NodeID); err != nil {
+		log.Warningf("failed to release node of user %q: %s", userId, err)
+	}
+}
+
+// userListResponse is the common shape of the user listing commands
+func userListResponse(users []*db.User) interface{} {
+	return map[string]interface{}{
+		"users": users,
+		"meta": map[string]interface{}{
+			"totalCount": len(users),
+		},
 	}
 }
 
@@ -393,21 +429,24 @@ func (self *gateway) ListUsers(ctx context.Context) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
+	// blend in this node's live connections, like GetUser, so local state
+	// stays accurate even when the heartbeat lags; users on other nodes are
+	// covered by the heartbeat
+	connected := make(map[string]struct{})
+	for _, userId := range self.connectedUserIds() {
+		connected[userId] = struct{}{}
+	}
 	for _, user := range users {
 		user.Status = nil
-		user.Online = isUserOnline(user)
+		_, local := connected[user.ID]
+		user.Online = local || isUserOnline(user)
 	}
-	return map[string]interface{}{
-		"users": users,
-		"meta": map[string]interface{}{
-			"totalCount": len(users),
-		},
-	}, nil
+	return userListResponse(users), nil
 }
 
 func (self *gateway) ListOnlineUsers(ctx context.Context) (interface{}, error) {
-	// online status is mesh-wide: query the users whose online_at is fresh,
-	// which includes users connected to other nodes
+	// online status is mesh-wide, derived purely from heartbeat freshness in
+	// sql, which includes users connected to other nodes
 	users, err := self.database.ListOnlineUsers(ctx, time.Now().Add(-onlineStaleThreshold))
 	if err != nil {
 		return nil, err
@@ -416,12 +455,7 @@ func (self *gateway) ListOnlineUsers(ctx context.Context) (interface{}, error) {
 		user.Status = nil
 		user.Online = true
 	}
-	return map[string]interface{}{
-		"users": users,
-		"meta": map[string]interface{}{
-			"totalCount": len(users),
-		},
-	}, nil
+	return userListResponse(users), nil
 }
 
 func (self *gateway) GetUser(ctx context.Context, userId string) (interface{}, error) {
