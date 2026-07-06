@@ -342,3 +342,49 @@ func TestGatewayListOnlineUsers(t *testing.T) {
 		}
 	}
 }
+
+// TestGatewayListOnlineUsersMeshWide proves online status is mesh-wide: a user
+// connected only to another node still shows up as online, with that node's id.
+func TestGatewayListOnlineUsersMeshWide(t *testing.T) {
+	t.Parallel()
+	database, release := dbtest.AcquireDatabase(t)
+	defer release()
+
+	peerCaSigner := newTestSigner(t)
+	userCaSignerA := newTestSigner(t)
+	userCaSignerB := newTestSigner(t)
+
+	addressA, _, releaseA := startTestNode(t, database, userCaSignerA, peerCaSigner, "node-a", "")
+	defer releaseA()
+	addressB, _, releaseB := startTestNode(t, database, userCaSignerB, peerCaSigner, "node-b", "")
+	defer releaseB()
+
+	extensions := map[string]string{"permit-port-forwarding": ""}
+
+	// carol connects only to node b
+	carol := dialTestGateway(t, addressB, newCertSigner(t, userCaSignerB, "carol", extensions), "carol")
+	defer func() {
+		_ = carol.Close()
+	}()
+
+	// bob connects to node a and queries from there
+	bob := dialTestGateway(t, addressA, newCertSigner(t, userCaSignerA, "bob", extensions), "bob")
+	defer func() {
+		_ = bob.Close()
+	}()
+
+	var online userList
+	if err := json.Unmarshal([]byte(runCommand(t, bob, "listOnlineUsers")), &online); err != nil {
+		t.Fatalf("failed to parse listOnlineUsers output: %s", err)
+	}
+	nodes := make(map[string]string)
+	for _, user := range online.Users {
+		nodes[user.ID] = user.NodeID
+	}
+	if node, ok := nodes["carol"]; !ok || node != "node-b" {
+		t.Fatalf("expected carol online on node-b, got %+v", nodes)
+	}
+	if node, ok := nodes["bob"]; !ok || node != "node-a" {
+		t.Fatalf("expected bob online on node-a, got %+v", nodes)
+	}
+}

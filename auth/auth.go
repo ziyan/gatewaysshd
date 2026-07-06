@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"time"
 
 	logging "github.com/op/go-logging"
 	geoip2 "github.com/oschwald/geoip2-golang/v2"
@@ -98,6 +99,8 @@ func (self *authenticator) authenticate(meta ssh.ConnMetadata, publicKey ssh.Pub
 		model.IP = ip.String()
 		model.Location = location
 		model.NodeID = self.settings.NodeID
+		// mark online immediately; the gateway heartbeat keeps it fresh
+		model.OnlineAt = time.Now()
 		return nil
 	})
 	if err != nil {

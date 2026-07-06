@@ -158,7 +158,7 @@ func TestListUsersOmitsHeavyColumns(t *testing.T) {
 	}
 }
 
-func TestGetUsers(t *testing.T) {
+func TestMarkUsersOnlineAndListOnlineUsers(t *testing.T) {
 	t.Parallel()
 	database, release := dbtest.AcquireDatabase(t)
 	defer release()
@@ -172,15 +172,21 @@ func TestGetUsers(t *testing.T) {
 		}
 	}
 
-	// empty id set returns nothing without touching the table
-	if got, err := database.GetUsers(t.Context(), nil); err != nil || got != nil {
-		t.Fatalf("expected nil for empty ids, got %+v err %v", got, err)
+	now := time.Now()
+
+	// empty id set is a no-op
+	if err := database.MarkUsersOnline(t.Context(), nil, now); err != nil {
+		t.Fatalf("expected nil for empty ids, got %v", err)
 	}
 
-	// only the requested (existing) ids come back, with node_id populated
-	got, err := database.GetUsers(t.Context(), []string{"alice", "carol", "missing"})
+	// mark alice and carol online now, bob stays offline
+	if err := database.MarkUsersOnline(t.Context(), []string{"alice", "carol"}, now); err != nil {
+		t.Fatalf("failed to mark users online: %s", err)
+	}
+
+	got, err := database.ListOnlineUsers(t.Context(), now.Add(-time.Minute))
 	if err != nil {
-		t.Fatalf("failed to list by ids: %s", err)
+		t.Fatalf("failed to list online users: %s", err)
 	}
 	seen := make(map[string]bool)
 	for _, user := range got {
@@ -188,8 +194,16 @@ func TestGetUsers(t *testing.T) {
 		if user.NodeID != "node-x" {
 			t.Fatalf("expected nodeId node-x for %s, got %q", user.ID, user.NodeID)
 		}
+		if user.OnlineAt.IsZero() {
+			t.Fatalf("expected onlineAt to be set for %s", user.ID)
+		}
 	}
 	if len(got) != 2 || !seen["alice"] || !seen["carol"] || seen["bob"] {
-		t.Fatalf("unexpected subset: %+v", seen)
+		t.Fatalf("unexpected online subset: %+v", seen)
+	}
+
+	// a since threshold newer than the heartbeat filters everyone out
+	if got, err := database.ListOnlineUsers(t.Context(), now.Add(time.Minute)); err != nil || len(got) != 0 {
+		t.Fatalf("expected no online users past the threshold, got %+v err %v", got, err)
 	}
 }

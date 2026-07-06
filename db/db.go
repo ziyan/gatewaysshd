@@ -30,7 +30,8 @@ type Database interface {
 	Close() error
 
 	ListUsers(context.Context) ([]*User, error)
-	GetUsers(context.Context, []string) ([]*User, error)
+	ListOnlineUsers(context.Context, time.Time) ([]*User, error)
+	MarkUsersOnline(context.Context, []string, time.Time) error
 	GetUser(context.Context, string) (*User, error)
 	PutUser(context.Context, string, func(*User) error) (*User, error)
 

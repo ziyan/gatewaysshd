@@ -89,7 +89,11 @@ type User struct {
 	// the node the user last connected to, used for mesh tunneling
 	NodeID string `json:"nodeId,omitempty"`
 
-	// whether the user is online, not saved in database
+	// the last time the user was seen connected on any node; refreshed on a
+	// heartbeat while connected, so a fresh value means online mesh-wide
+	OnlineAt time.Time `json:"onlineAt,omitempty"`
+
+	// whether the user is online, derived from OnlineAt, not saved in database
 	Online bool `json:"online,omitempty" gorm:"-"`
 
 	// current connections, not saved in database

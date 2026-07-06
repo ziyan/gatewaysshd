@@ -17,6 +17,16 @@ import (
 
 var log = logging.MustGetLogger("gateway")
 
+const (
+	// how often each node refreshes online_at for its connected users
+	onlineHeartbeatInterval = 30 * time.Second
+
+	// how long after the last heartbeat a user still counts as online; must be
+	// larger than onlineHeartbeatInterval so a user stays online between beats,
+	// and bounds how long a crashed node keeps its users appearing online
+	onlineStaleThreshold = 90 * time.Second
+)
+
 type Settings struct {
 	// version string
 	Version string
@@ -99,6 +109,12 @@ func Open(database db.Database, sshConfig *ssh.ServerConfig, settings *Settings)
 			self.runPeers(context.Background())
 		}()
 	}
+	self.waitGroup.Add(1)
+	go func() {
+		defer deferutil.Recover()
+		defer self.waitGroup.Done()
+		self.runOnlineHeartbeat(context.Background())
+	}()
 	return self, nil
 }
 
@@ -321,19 +337,52 @@ func (self *gateway) gatherStatus(user string) map[string]interface{} {
 	}
 }
 
-// onlineUsers returns the set of distinct user ids that currently have a
-// connection. peer connections carry no user and are excluded.
-func (self *gateway) onlineUsers() map[string]struct{} {
+// isOnline reports whether the user's online_at is fresh enough to count as
+// online. online_at is refreshed on a heartbeat by whichever node the user is
+// connected to, so this is mesh-wide.
+func isOnline(user *db.User) bool {
+	return !user.OnlineAt.IsZero() && time.Since(user.OnlineAt) < onlineStaleThreshold
+}
+
+// connectedUserIDs returns the distinct users currently connected to this node.
+// peer connections carry no user and are excluded.
+func (self *gateway) connectedUserIDs() []string {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
-	online := make(map[string]struct{}, len(self.connectionsList))
+	seen := make(map[string]struct{}, len(self.connectionsList))
+	ids := make([]string, 0, len(self.connectionsList))
 	for _, connection := range self.connectionsList {
-		if connection.user != "" {
-			online[connection.user] = struct{}{}
+		if connection.user == "" {
+			continue
+		}
+		if _, ok := seen[connection.user]; ok {
+			continue
+		}
+		seen[connection.user] = struct{}{}
+		ids = append(ids, connection.user)
+	}
+	return ids
+}
+
+// runOnlineHeartbeat periodically refreshes online_at for the users connected
+// to this node, so their online status is visible mesh-wide and ages out on
+// its own if this node stops beating.
+func (self *gateway) runOnlineHeartbeat(ctx context.Context) {
+	for {
+		select {
+		case <-self.done:
+			return
+		case <-time.After(onlineHeartbeatInterval):
+			ids := self.connectedUserIDs()
+			if len(ids) == 0 {
+				continue
+			}
+			if err := self.database.MarkUsersOnline(ctx, ids, time.Now()); err != nil {
+				log.Warningf("failed to refresh online users: %s", err)
+			}
 		}
 	}
-	return online
 }
 
 func (self *gateway) ListUsers(ctx context.Context) (interface{}, error) {
@@ -341,10 +390,9 @@ func (self *gateway) ListUsers(ctx context.Context) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	online := self.onlineUsers()
 	for _, user := range users {
 		user.Status = nil
-		_, user.Online = online[user.ID]
+		user.Online = isOnline(user)
 	}
 	return map[string]interface{}{
 		"users": users,
@@ -355,14 +403,9 @@ func (self *gateway) ListUsers(ctx context.Context) (interface{}, error) {
 }
 
 func (self *gateway) ListOnlineUsers(ctx context.Context) (interface{}, error) {
-	// the online users are a known, small subset, so query only their rows
-	// instead of loading and filtering the whole table
-	online := self.onlineUsers()
-	ids := make([]string, 0, len(online))
-	for id := range online {
-		ids = append(ids, id)
-	}
-	users, err := self.database.GetUsers(ctx, ids)
+	// online status is mesh-wide: query the users whose online_at is fresh,
+	// which includes users connected to other nodes
+	users, err := self.database.ListOnlineUsers(ctx, time.Now().Add(-onlineStaleThreshold))
 	if err != nil {
 		return nil, err
 	}
@@ -399,7 +442,8 @@ func (self *gateway) GetUser(ctx context.Context, userId string) (interface{}, e
 		}
 	}()
 
-	user.Online = len(connections) > 0
+	// online if connected here or seen recently on any node in the mesh
+	user.Online = len(connections) > 0 || isOnline(user)
 	user.Connections = connections
 
 	return map[string]interface{}{

@@ -20,6 +20,7 @@ var userListColumns = []string{
 	"administrator",
 	"disabled",
 	"node_id",
+	"online_at",
 }
 
 func (self *database) ListUsers(ctx context.Context) ([]*User, error) {
@@ -40,17 +41,14 @@ func (self *database) ListUsers(ctx context.Context) ([]*User, error) {
 	return results, nil
 }
 
-// GetUsers returns only the users with the given ids, filtered in sql, so
-// callers that already know the subset (e.g. currently-online users) do not
-// load the whole table.
-func (self *database) GetUsers(ctx context.Context, ids []string) ([]*User, error) {
-	if len(ids) == 0 {
-		return nil, nil
-	}
+// ListOnlineUsers returns the users whose online_at is newer than since,
+// filtered in sql. Online status is mesh-wide: any node refreshing a user's
+// online_at (see MarkUsersOnline) makes it visible from every node.
+func (self *database) ListOnlineUsers(ctx context.Context, since time.Time) ([]*User, error) {
 	var results []*User
 	if err := self.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var models []User
-		if err := tx.Select(userListColumns).Where("id IN ?", ids).Find(&models).Error; err != nil {
+		if err := tx.Select(userListColumns).Where("online_at > ?", since).Find(&models).Error; err != nil {
 			return err
 		}
 		results = make([]*User, 0, len(models))
@@ -62,6 +60,15 @@ func (self *database) GetUsers(ctx context.Context, ids []string) ([]*User, erro
 		return nil, err
 	}
 	return results, nil
+}
+
+// MarkUsersOnline refreshes online_at for the given users, called on a
+// heartbeat by the node they are connected to.
+func (self *database) MarkUsersOnline(ctx context.Context, ids []string, at time.Time) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return self.db.WithContext(ctx).Model(&User{}).Where("id IN ?", ids).Update("online_at", at).Error
 }
 
 func (self *database) GetUser(ctx context.Context, userId string) (*User, error) {
