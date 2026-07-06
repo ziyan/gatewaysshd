@@ -148,6 +148,8 @@ func (self *service) handleCommand(command []string) error {
 		return self.status(command[1])
 	case len(command) == 1 && command[0] == "listUsers":
 		return self.listUsers()
+	case len(command) == 1 && command[0] == "listOnlineUsers":
+		return self.listOnlineUsers()
 	case len(command) == 2 && command[0] == "getUser":
 		return self.getUser(command[1])
 	}
@@ -172,6 +174,7 @@ func (self *service) help() error {
 		content = append(content, []string{
 			"    status [username] - show gateway status, optionally filter by username",
 			"    listUsers - list all users in database",
+			"    listOnlineUsers - list users that are currently online",
 			"    getUser <username> - get details about a user from database",
 			"",
 		}...)
@@ -281,6 +284,14 @@ func (self *service) reportScreenshot() error {
 
 func (self *service) listUsers() error {
 	output, err := self.connection.gateway.ListUsers(context.Background())
+	if err != nil {
+		return err
+	}
+	return self.marshal(output)
+}
+
+func (self *service) listOnlineUsers() error {
+	output, err := self.connection.gateway.ListOnlineUsers(context.Background())
 	if err != nil {
 		return err
 	}

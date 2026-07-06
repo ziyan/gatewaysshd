@@ -21,6 +21,7 @@ func (self *database) ListUsers(ctx context.Context) ([]*User, error) {
 			"location",
 			"administrator",
 			"disabled",
+			"node_id",
 		}).Find(&models).Error; err != nil {
 			return err
 		}

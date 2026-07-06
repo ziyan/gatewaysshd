@@ -322,28 +322,43 @@ func (self *gateway) gatherStatus(user string) map[string]interface{} {
 }
 
 func (self *gateway) ListUsers(ctx context.Context) (interface{}, error) {
+	return self.listUsers(ctx, false)
+}
+
+func (self *gateway) ListOnlineUsers(ctx context.Context) (interface{}, error) {
+	return self.listUsers(ctx, true)
+}
+
+// listUsers returns the users from the database annotated with their online
+// status; when onlineOnly is set, offline users are omitted.
+func (self *gateway) listUsers(ctx context.Context, onlineOnly bool) (interface{}, error) {
 	users, err := self.database.ListUsers(ctx)
 	if err != nil {
 		return nil, err
 	}
+	filtered := make([]*db.User, 0, len(users))
 	func() {
 		self.lock.Lock()
 		defer self.lock.Unlock()
+		online := make(map[string]bool, len(self.connectionsList))
+		for _, connection := range self.connectionsList {
+			if connection.user != "" {
+				online[connection.user] = true
+			}
+		}
 		for _, user := range users {
 			user.Status = nil
-			user.Online = false
-			for _, connection := range self.connectionsList {
-				if connection.user == user.ID {
-					user.Online = true
-					break
-				}
+			user.Online = online[user.ID]
+			if onlineOnly && !user.Online {
+				continue
 			}
+			filtered = append(filtered, user)
 		}
 	}()
 	return map[string]interface{}{
-		"users": users,
+		"users": filtered,
 		"meta": map[string]interface{}{
-			"totalCount": len(users),
+			"totalCount": len(filtered),
 		},
 	}, nil
 }

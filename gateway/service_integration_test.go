@@ -11,7 +11,20 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/ziyan/gatewaysshd/db"
+	"github.com/ziyan/gatewaysshd/db/dbtest"
 )
+
+// userList is the shape of listUsers / listOnlineUsers output for assertions.
+type userList struct {
+	Users []struct {
+		ID     string `json:"id"`
+		Online bool   `json:"online"`
+		NodeID string `json:"nodeId"`
+	} `json:"users"`
+	Meta struct {
+		TotalCount int `json:"totalCount"`
+	} `json:"meta"`
+}
 
 func runCommand(t *testing.T, client *ssh.Client, command string) string {
 	t.Helper()
@@ -267,5 +280,65 @@ func TestGatewayKickUserRequiresAdministrator(t *testing.T) {
 	case <-done:
 	case <-time.After(10 * time.Second):
 		t.Fatal("expected victim connection to be closed")
+	}
+}
+
+// TestGatewayListOnlineUsers proves listOnlineUsers returns only currently
+// connected users and that each user record carries its nodeId.
+func TestGatewayListOnlineUsers(t *testing.T) {
+	t.Parallel()
+	database, release := dbtest.AcquireDatabase(t)
+	defer release()
+
+	peerCaSigner := newTestSigner(t)
+	userCaSigner := newTestSigner(t)
+	address, _, releaseNode := startTestNode(t, database, userCaSigner, peerCaSigner, "node-a", "")
+	defer releaseNode()
+
+	// a user that exists in the database but is not connected
+	if _, err := database.PutUser(t.Context(), "ghost", func(user *db.User) error {
+		return nil
+	}); err != nil {
+		t.Fatalf("failed to create offline user: %s", err)
+	}
+
+	// bob connects (online) and can run the listing commands
+	extensions := map[string]string{"permit-port-forwarding": ""}
+	bob := dialTestGateway(t, address, newCertSigner(t, userCaSigner, "bob", extensions), "bob")
+	defer func() {
+		_ = bob.Close()
+	}()
+
+	parse := func(command string) userList {
+		t.Helper()
+		var result userList
+		if err := json.Unmarshal([]byte(runCommand(t, bob, command)), &result); err != nil {
+			t.Fatalf("failed to parse %s output: %s", command, err)
+		}
+		return result
+	}
+
+	// listUsers includes both the online (bob) and offline (ghost) users
+	all := parse("listUsers")
+	if all.Meta.TotalCount != 2 {
+		t.Fatalf("expected listUsers totalCount 2, got %d", all.Meta.TotalCount)
+	}
+
+	// listOnlineUsers returns only bob, with online=true and nodeId set
+	online := parse("listOnlineUsers")
+	if online.Meta.TotalCount != 1 {
+		t.Fatalf("expected listOnlineUsers totalCount 1, got %d", online.Meta.TotalCount)
+	}
+	user := online.Users[0]
+	if user.ID != "bob" || !user.Online {
+		t.Fatalf("unexpected online user: %+v", user)
+	}
+	if user.NodeID != "node-a" {
+		t.Fatalf("expected nodeId node-a, got %q", user.NodeID)
+	}
+	for _, candidate := range online.Users {
+		if candidate.ID == "ghost" {
+			t.Fatal("listOnlineUsers included an offline user")
+		}
 	}
 }
