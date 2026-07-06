@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
@@ -155,5 +156,104 @@ func TestListUsersOmitsHeavyColumns(t *testing.T) {
 		if len(user.Status) != 0 || len(user.Screenshot) != 0 {
 			t.Fatalf("expected heavy columns to be omitted, got %+v", user)
 		}
+	}
+}
+
+func TestMarkUsersOnlineAndListOnlineUsers(t *testing.T) {
+	t.Parallel()
+	database, release := dbtest.AcquireDatabase(t)
+	defer release()
+
+	// a live node and a dead one, for the node_id adoption rule
+	seedNode := func(nodeId string, onlineAt time.Time) {
+		if _, err := database.PutNode(t.Context(), nodeId, func(node *db.Node) error {
+			node.Online = true
+			node.OnlineAt = onlineAt
+			return nil
+		}); err != nil {
+			t.Fatalf("failed to seed node %s: %s", nodeId, err)
+		}
+	}
+	seedNode("node-live", time.Now())
+	seedNode("node-dead", time.Now().Add(-time.Hour))
+
+	// alice sits on a live node, bob never comes online, carol's node died,
+	// dave never had a node
+	for name, nodeId := range map[string]string{"alice": "node-live", "bob": "node-live", "carol": "node-dead", "dave": ""} {
+		if _, err := database.PutUser(t.Context(), name, func(user *db.User) error {
+			user.NodeID = nodeId
+			return nil
+		}); err != nil {
+			t.Fatalf("failed to create user %s: %s", name, err)
+		}
+	}
+
+	// empty id set is a no-op
+	if err := database.MarkUsersOnline(t.Context(), nil, "node-y", time.Minute); err != nil {
+		t.Fatalf("expected nil for empty ids, got %v", err)
+	}
+
+	// node-y heartbeats alice, carol and dave; bob stays offline
+	if err := database.MarkUsersOnline(t.Context(), []string{"alice", "carol", "dave"}, "node-y", time.Minute); err != nil {
+		t.Fatalf("failed to mark users online: %s", err)
+	}
+
+	users, err := database.ListOnlineUsers(t.Context(), time.Now().Add(-time.Minute))
+	if err != nil {
+		t.Fatalf("failed to list online users: %s", err)
+	}
+	nodes := make(map[string]string)
+	for _, user := range users {
+		if user.OnlineAt.IsZero() {
+			t.Fatalf("expected onlineAt to be set for %s", user.ID)
+		}
+		nodes[user.ID] = user.NodeID
+	}
+	// alice keeps her live node, carol and dave are adopted by node-y
+	want := map[string]string{"alice": "node-live", "carol": "node-y", "dave": "node-y"}
+	if !reflect.DeepEqual(nodes, want) {
+		t.Fatalf("unexpected online users: %+v, want %+v", nodes, want)
+	}
+
+	// a since threshold newer than the heartbeat filters everyone out
+	if users, err := database.ListOnlineUsers(t.Context(), time.Now().Add(time.Minute)); err != nil || len(users) != 0 {
+		t.Fatalf("expected no online users past the threshold, got %+v err %v", users, err)
+	}
+
+	// a node not in the mesh refreshes online_at but never touches node_id
+	if err := database.MarkUsersOnline(t.Context(), []string{"dave"}, "", time.Minute); err != nil {
+		t.Fatalf("failed to mark users online without a node: %s", err)
+	}
+	if user, err := database.GetUser(t.Context(), "dave"); err != nil || user.NodeID != "node-y" {
+		t.Fatalf("expected node_id to survive a non-mesh heartbeat, got %+v err %v", user, err)
+	}
+}
+
+func TestClearUserNodeID(t *testing.T) {
+	t.Parallel()
+	database, release := dbtest.AcquireDatabase(t)
+	defer release()
+
+	if _, err := database.PutUser(t.Context(), "alice", func(user *db.User) error {
+		user.NodeID = "node-a"
+		return nil
+	}); err != nil {
+		t.Fatalf("failed to create user: %s", err)
+	}
+
+	// clearing on behalf of another node is a no-op
+	if err := database.ClearUserNodeID(t.Context(), "alice", "node-b"); err != nil {
+		t.Fatalf("failed to clear node: %s", err)
+	}
+	if user, err := database.GetUser(t.Context(), "alice"); err != nil || user.NodeID != "node-a" {
+		t.Fatalf("expected node_id to be kept, got %+v err %v", user, err)
+	}
+
+	// clearing by the owning node releases the user
+	if err := database.ClearUserNodeID(t.Context(), "alice", "node-a"); err != nil {
+		t.Fatalf("failed to clear node: %s", err)
+	}
+	if user, err := database.GetUser(t.Context(), "alice"); err != nil || user.NodeID != "" {
+		t.Fatalf("expected node_id to be cleared, got %+v err %v", user, err)
 	}
 }

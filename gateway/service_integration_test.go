@@ -11,7 +11,30 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/ziyan/gatewaysshd/db"
+	"github.com/ziyan/gatewaysshd/db/dbtest"
 )
+
+// userList is the shape of listUsers / listOnlineUsers output for assertions.
+type userList struct {
+	Users []struct {
+		ID     string `json:"id"`
+		Online bool   `json:"online"`
+		NodeID string `json:"nodeId"`
+	} `json:"users"`
+	Meta struct {
+		TotalCount int `json:"totalCount"`
+	} `json:"meta"`
+}
+
+// parseUserList runs a user listing command and parses its JSON output.
+func parseUserList(t *testing.T, client *ssh.Client, command string) userList {
+	t.Helper()
+	var result userList
+	if err := json.Unmarshal([]byte(runCommand(t, client, command)), &result); err != nil {
+		t.Fatalf("failed to parse %s output: %s", command, err)
+	}
+	return result
+}
 
 func runCommand(t *testing.T, client *ssh.Client, command string) string {
 	t.Helper()
@@ -267,5 +290,160 @@ func TestGatewayKickUserRequiresAdministrator(t *testing.T) {
 	case <-done:
 	case <-time.After(10 * time.Second):
 		t.Fatal("expected victim connection to be closed")
+	}
+}
+
+// TestGatewayListOnlineUsers proves listOnlineUsers returns only currently
+// connected users and that each user record carries its nodeId.
+func TestGatewayListOnlineUsers(t *testing.T) {
+	t.Parallel()
+	database, release := dbtest.AcquireDatabase(t)
+	defer release()
+
+	peerCaSigner := newTestSigner(t)
+	userCaSigner := newTestSigner(t)
+	address, _, releaseNode := startTestNode(t, database, userCaSigner, peerCaSigner, "node-a", "")
+	defer releaseNode()
+
+	// a user that exists in the database but is not connected
+	if _, err := database.PutUser(t.Context(), "ghost", func(user *db.User) error {
+		return nil
+	}); err != nil {
+		t.Fatalf("failed to create offline user: %s", err)
+	}
+
+	// a disabled user whose rejected login attempt must not count as online
+	if _, err := database.PutUser(t.Context(), "mallory", func(user *db.User) error {
+		user.Disabled = true
+		return nil
+	}); err != nil {
+		t.Fatalf("failed to create disabled user: %s", err)
+	}
+	extensions := map[string]string{"permit-port-forwarding": ""}
+	if _, err := ssh.Dial("tcp", address, &ssh.ClientConfig{
+		User:            "mallory",
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(newCertSigner(t, userCaSigner, "mallory", extensions))},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
+		Timeout:         10 * time.Second,
+	}); err == nil {
+		t.Fatal("expected disabled user login to be rejected")
+	}
+
+	// bob connects (online) and can run the listing commands
+	bob := dialTestGateway(t, address, newCertSigner(t, userCaSigner, "bob", extensions), "bob")
+	defer func() {
+		_ = bob.Close()
+	}()
+
+	// listUsers includes the online (bob) and offline (ghost, mallory) users
+	all := parseUserList(t, bob, "listUsers")
+	if all.Meta.TotalCount != 3 {
+		t.Fatalf("expected listUsers totalCount 3, got %d", all.Meta.TotalCount)
+	}
+
+	// listOnlineUsers returns only bob, with online=true and nodeId set
+	online := parseUserList(t, bob, "listOnlineUsers")
+	if online.Meta.TotalCount != 1 {
+		t.Fatalf("expected listOnlineUsers totalCount 1, got %d", online.Meta.TotalCount)
+	}
+	user := online.Users[0]
+	if user.ID != "bob" || !user.Online {
+		t.Fatalf("unexpected online user: %+v", user)
+	}
+	if user.NodeID != "node-a" {
+		t.Fatalf("expected nodeId node-a, got %q", user.NodeID)
+	}
+	for _, candidate := range online.Users {
+		if candidate.ID == "ghost" || candidate.ID == "mallory" {
+			t.Fatalf("listOnlineUsers included an offline user %s", candidate.ID)
+		}
+	}
+}
+
+// TestGatewayListOnlineUsersMeshWide proves online status is mesh-wide: a user
+// connected only to another node still shows up as online, with that node's id.
+func TestGatewayListOnlineUsersMeshWide(t *testing.T) {
+	t.Parallel()
+	database, release := dbtest.AcquireDatabase(t)
+	defer release()
+
+	peerCaSigner := newTestSigner(t)
+	userCaSignerA := newTestSigner(t)
+	userCaSignerB := newTestSigner(t)
+
+	addressA, _, releaseA := startTestNode(t, database, userCaSignerA, peerCaSigner, "node-a", "")
+	defer releaseA()
+	addressB, _, releaseB := startTestNode(t, database, userCaSignerB, peerCaSigner, "node-b", "")
+	defer releaseB()
+
+	extensions := map[string]string{"permit-port-forwarding": ""}
+
+	// carol connects only to node b
+	carol := dialTestGateway(t, addressB, newCertSigner(t, userCaSignerB, "carol", extensions), "carol")
+	defer func() {
+		_ = carol.Close()
+	}()
+
+	// bob connects to node a and queries from there
+	bob := dialTestGateway(t, addressA, newCertSigner(t, userCaSignerA, "bob", extensions), "bob")
+	defer func() {
+		_ = bob.Close()
+	}()
+
+	online := parseUserList(t, bob, "listOnlineUsers")
+	nodes := make(map[string]string)
+	for _, user := range online.Users {
+		nodes[user.ID] = user.NodeID
+	}
+	if node, ok := nodes["carol"]; !ok || node != "node-b" {
+		t.Fatalf("expected carol online on node-b, got %+v", nodes)
+	}
+	if node, ok := nodes["bob"]; !ok || node != "node-a" {
+		t.Fatalf("expected bob online on node-a, got %+v", nodes)
+	}
+}
+
+// TestGatewayReleasesUserNodeOnDisconnect proves the user's node_id is
+// released when their last connection to the node closes, so a node they are
+// still connected to can adopt them on its next heartbeat.
+func TestGatewayReleasesUserNodeOnDisconnect(t *testing.T) {
+	t.Parallel()
+	database, release := dbtest.AcquireDatabase(t)
+	defer release()
+
+	peerCaSigner := newTestSigner(t)
+	userCaSigner := newTestSigner(t)
+	address, _, releaseNode := startTestNode(t, database, userCaSigner, peerCaSigner, "node-a", "")
+	defer releaseNode()
+
+	extensions := map[string]string{"permit-port-forwarding": ""}
+	bob := dialTestGateway(t, address, newCertSigner(t, userCaSigner, "bob", extensions), "bob")
+	defer func() {
+		_ = bob.Close()
+	}()
+
+	user, err := database.GetUser(t.Context(), "bob")
+	if err != nil || user == nil || user.NodeID != "node-a" {
+		t.Fatalf("expected bob on node-a, got %+v err %v", user, err)
+	}
+
+	if err := bob.Close(); err != nil {
+		t.Fatalf("failed to close connection: %s", err)
+	}
+
+	// the connection teardown that releases node_id is asynchronous
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		user, err := database.GetUser(t.Context(), "bob")
+		if err != nil {
+			t.Fatalf("failed to get user: %s", err)
+		}
+		if user.NodeID == "" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected node_id to be released, still %q", user.NodeID)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }

@@ -89,7 +89,11 @@ type User struct {
 	// the node the user last connected to, used for mesh tunneling
 	NodeID string `json:"nodeId,omitempty"`
 
-	// whether the user is online, not saved in database
+	// the last time the user was seen connected on any node; refreshed on a
+	// heartbeat while connected, so a fresh value means online mesh-wide
+	OnlineAt time.Time `json:"onlineAt,omitempty"`
+
+	// whether the user is online, derived from OnlineAt, not saved in database
 	Online bool `json:"online,omitempty" gorm:"-"`
 
 	// current connections, not saved in database
@@ -115,10 +119,12 @@ type Node struct {
 	// dialing peers to verify the remote host
 	HostPublicKey string `json:"hostPublicKey,omitempty"`
 
-	// whether the node is online
+	// whether the node is online; cleared on clean shutdown, but a crashed
+	// node leaves it set, so liveness also requires a fresh OnlineAt
 	Online bool `json:"online,omitempty"`
 
-	// when the online status last changed
+	// the last online heartbeat, refreshed while the node is running, so a
+	// stale value marks a node that went away without marking itself offline
 	OnlineAt time.Time `json:"onlineAt,omitempty"`
 }
 
