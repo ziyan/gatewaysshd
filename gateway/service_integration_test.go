@@ -312,17 +312,33 @@ func TestGatewayListOnlineUsers(t *testing.T) {
 		t.Fatalf("failed to create offline user: %s", err)
 	}
 
-	// bob connects (online) and can run the listing commands
+	// a disabled user whose rejected login attempt must not count as online
+	if _, err := database.PutUser(t.Context(), "mallory", func(user *db.User) error {
+		user.Disabled = true
+		return nil
+	}); err != nil {
+		t.Fatalf("failed to create disabled user: %s", err)
+	}
 	extensions := map[string]string{"permit-port-forwarding": ""}
+	if _, err := ssh.Dial("tcp", address, &ssh.ClientConfig{
+		User:            "mallory",
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(newCertSigner(t, userCaSigner, "mallory", extensions))},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
+		Timeout:         10 * time.Second,
+	}); err == nil {
+		t.Fatal("expected disabled user login to be rejected")
+	}
+
+	// bob connects (online) and can run the listing commands
 	bob := dialTestGateway(t, address, newCertSigner(t, userCaSigner, "bob", extensions), "bob")
 	defer func() {
 		_ = bob.Close()
 	}()
 
-	// listUsers includes both the online (bob) and offline (ghost) users
+	// listUsers includes the online (bob) and offline (ghost, mallory) users
 	all := parseUserList(t, bob, "listUsers")
-	if all.Meta.TotalCount != 2 {
-		t.Fatalf("expected listUsers totalCount 2, got %d", all.Meta.TotalCount)
+	if all.Meta.TotalCount != 3 {
+		t.Fatalf("expected listUsers totalCount 3, got %d", all.Meta.TotalCount)
 	}
 
 	// listOnlineUsers returns only bob, with online=true and nodeId set
@@ -338,8 +354,8 @@ func TestGatewayListOnlineUsers(t *testing.T) {
 		t.Fatalf("expected nodeId node-a, got %q", user.NodeID)
 	}
 	for _, candidate := range online.Users {
-		if candidate.ID == "ghost" {
-			t.Fatal("listOnlineUsers included an offline user")
+		if candidate.ID == "ghost" || candidate.ID == "mallory" {
+			t.Fatalf("listOnlineUsers included an offline user %s", candidate.ID)
 		}
 	}
 }
