@@ -12,6 +12,37 @@ requests.
 
 
 
+
+## 0.9.0 (2026-07-06)
+
+### Added
+
+- `listLocalOnlineUsers` shell command that lists users connected to the current node (#15)
+
+### Changed
+
+- Authentication, status reports and mesh routing lookups now cost a single (#15)
+  database roundtrip instead of 3-4 with full-row payloads (#15)
+
+<details>
+<summary>Commit summary (auto-generated)</summary>
+
+### Bug Fixes
+
+* **gateway:** apply review findings on the single-roundtrip paths ([e0d9f7d](https://github.com/ziyan/gatewaysshd/commit/e0d9f7d024b2a9072c13519263b189b70f42496a))
+
+
+### Features
+
+* **gateway:** add listLocalOnlineUsers command ([81d62d9](https://github.com/ziyan/gatewaysshd/commit/81d62d9f73c658e1daef2c9ddd1d1b147cb2c033))
+
+
+### Performance Improvements
+
+* **db:** make hot paths cost a single database roundtrip ([980369b](https://github.com/ziyan/gatewaysshd/commit/980369b686cb89f29a124fd8e36821ba6864148a))
+
+</details>
+
 ## 0.8.0 (2026-07-06)
 
 ### Added
