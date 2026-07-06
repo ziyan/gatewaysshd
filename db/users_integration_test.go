@@ -157,3 +157,39 @@ func TestListUsersOmitsHeavyColumns(t *testing.T) {
 		}
 	}
 }
+
+func TestListUsersByIDs(t *testing.T) {
+	t.Parallel()
+	database, release := dbtest.AcquireDatabase(t)
+	defer release()
+
+	for _, name := range []string{"alice", "bob", "carol"} {
+		if _, err := database.PutUser(t.Context(), name, func(user *db.User) error {
+			user.NodeID = "node-x"
+			return nil
+		}); err != nil {
+			t.Fatalf("failed to create user %s: %s", name, err)
+		}
+	}
+
+	// empty id set returns nothing without touching the table
+	if got, err := database.ListUsersByIDs(t.Context(), nil); err != nil || got != nil {
+		t.Fatalf("expected nil for empty ids, got %+v err %v", got, err)
+	}
+
+	// only the requested (existing) ids come back, with node_id populated
+	got, err := database.ListUsersByIDs(t.Context(), []string{"alice", "carol", "missing"})
+	if err != nil {
+		t.Fatalf("failed to list by ids: %s", err)
+	}
+	seen := make(map[string]bool)
+	for _, user := range got {
+		seen[user.ID] = true
+		if user.NodeID != "node-x" {
+			t.Fatalf("expected nodeId node-x for %s, got %q", user.ID, user.NodeID)
+		}
+	}
+	if len(got) != 2 || !seen["alice"] || !seen["carol"] || seen["bob"] {
+		t.Fatalf("unexpected subset: %+v", seen)
+	}
+}

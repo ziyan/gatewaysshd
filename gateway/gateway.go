@@ -321,44 +321,59 @@ func (self *gateway) gatherStatus(user string) map[string]interface{} {
 	}
 }
 
+// onlineUsers returns the set of distinct user ids that currently have a
+// connection. peer connections carry no user and are excluded.
+func (self *gateway) onlineUsers() map[string]struct{} {
+	self.lock.Lock()
+	defer self.lock.Unlock()
+
+	online := make(map[string]struct{}, len(self.connectionsList))
+	for _, connection := range self.connectionsList {
+		if connection.user != "" {
+			online[connection.user] = struct{}{}
+		}
+	}
+	return online
+}
+
 func (self *gateway) ListUsers(ctx context.Context) (interface{}, error) {
-	return self.listUsers(ctx, false)
-}
-
-func (self *gateway) ListOnlineUsers(ctx context.Context) (interface{}, error) {
-	return self.listUsers(ctx, true)
-}
-
-// listUsers returns the users from the database annotated with their online
-// status; when onlineOnly is set, offline users are omitted.
-func (self *gateway) listUsers(ctx context.Context, onlineOnly bool) (interface{}, error) {
 	users, err := self.database.ListUsers(ctx)
 	if err != nil {
 		return nil, err
 	}
-	filtered := make([]*db.User, 0, len(users))
-	func() {
-		self.lock.Lock()
-		defer self.lock.Unlock()
-		online := make(map[string]bool, len(self.connectionsList))
-		for _, connection := range self.connectionsList {
-			if connection.user != "" {
-				online[connection.user] = true
-			}
-		}
-		for _, user := range users {
-			user.Status = nil
-			user.Online = online[user.ID]
-			if onlineOnly && !user.Online {
-				continue
-			}
-			filtered = append(filtered, user)
-		}
-	}()
+	online := self.onlineUsers()
+	for _, user := range users {
+		user.Status = nil
+		_, user.Online = online[user.ID]
+	}
 	return map[string]interface{}{
-		"users": filtered,
+		"users": users,
 		"meta": map[string]interface{}{
-			"totalCount": len(filtered),
+			"totalCount": len(users),
+		},
+	}, nil
+}
+
+func (self *gateway) ListOnlineUsers(ctx context.Context) (interface{}, error) {
+	// the online users are a known, small subset, so query only their rows
+	// instead of loading and filtering the whole table
+	online := self.onlineUsers()
+	ids := make([]string, 0, len(online))
+	for id := range online {
+		ids = append(ids, id)
+	}
+	users, err := self.database.ListUsersByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, user := range users {
+		user.Status = nil
+		user.Online = true
+	}
+	return map[string]interface{}{
+		"users": users,
+		"meta": map[string]interface{}{
+			"totalCount": len(users),
 		},
 	}, nil
 }
