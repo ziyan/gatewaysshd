@@ -344,9 +344,9 @@ func isOnline(user *db.User) bool {
 	return !user.OnlineAt.IsZero() && time.Since(user.OnlineAt) < onlineStaleThreshold
 }
 
-// connectedUserIDs returns the distinct users currently connected to this node.
+// connectedUserIds returns the distinct users currently connected to this node.
 // peer connections carry no user and are excluded.
-func (self *gateway) connectedUserIDs() []string {
+func (self *gateway) connectedUserIds() []string {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
@@ -374,11 +374,11 @@ func (self *gateway) runOnlineHeartbeat(ctx context.Context) {
 		case <-self.done:
 			return
 		case <-time.After(onlineHeartbeatInterval):
-			ids := self.connectedUserIDs()
+			ids := self.connectedUserIds()
 			if len(ids) == 0 {
 				continue
 			}
-			if err := self.database.MarkUsersOnline(ctx, ids, time.Now()); err != nil {
+			if err := self.database.MarkUsersOnline(ctx, ids, self.settings.NodeID, time.Now()); err != nil {
 				log.Warningf("failed to refresh online users: %s", err)
 			}
 		}
