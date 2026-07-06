@@ -69,6 +69,7 @@ type Gateway interface {
 
 	ListUsers(context.Context) (interface{}, error)
 	ListOnlineUsers(context.Context) (interface{}, error)
+	ListLocalOnlineUsers(context.Context) (interface{}, error)
 	GetUser(context.Context, string) (interface{}, error)
 	GetUserScreenshot(context.Context, string) ([]byte, error)
 }
@@ -241,21 +242,21 @@ func (self *gateway) lookupRemotePeer(ctx context.Context, host string) *peer {
 		if user == "" {
 			continue
 		}
-		model, err := self.database.GetUser(ctx, user)
+		nodeId, err := self.database.GetUserNodeID(ctx, user)
 		if err != nil {
 			// a transient error on one candidate must not abort resolving the
 			// remaining, more-specific user suffixes
 			log.Warningf("failed to look up user %q for mesh tunneling: %s", user, err)
 			continue
 		}
-		if model == nil || model.NodeID == "" || model.NodeID == self.settings.NodeID {
+		if nodeId == "" || nodeId == self.settings.NodeID {
 			continue
 		}
-		if peer := self.getPeer(model.NodeID); peer != nil {
-			log.Debugf("lookup: found remote node for host %q: node = %s", host, model.NodeID)
+		if peer := self.getPeer(nodeId); peer != nil {
+			log.Debugf("lookup: found remote node for host %q: node = %s", host, nodeId)
 			return peer
 		}
-		log.Debugf("lookup: user %q is on node %s but no peer connection is available", user, model.NodeID)
+		log.Debugf("lookup: user %q is on node %s but no peer connection is available", user, nodeId)
 	}
 	return nil
 }
@@ -391,6 +392,20 @@ func (self *gateway) runOnlineHeartbeat(ctx context.Context) {
 			cancel()
 			if err != nil {
 				log.Warningf("failed to refresh online users: %s", err)
+				continue
+			}
+			// a user may have disconnected while the update was in flight,
+			// right after releaseUserNode cleared their node_id: the update
+			// would then have re-adopted them onto this node, so release
+			// everyone from the batch that is no longer connected
+			stillConnected := make(map[string]struct{}, len(userIds))
+			for _, userId := range self.connectedUserIds() {
+				stillConnected[userId] = struct{}{}
+			}
+			for _, userId := range userIds {
+				if _, ok := stillConnected[userId]; !ok {
+					self.releaseUserNode(userId)
+				}
 			}
 		}
 	}
@@ -416,12 +431,26 @@ func (self *gateway) releaseUserNode(userId string) {
 
 // userListResponse is the common shape of the user listing commands
 func userListResponse(users []*db.User) interface{} {
+	if users == nil {
+		// marshal an empty list as [] instead of null
+		users = []*db.User{}
+	}
 	return map[string]interface{}{
 		"users": users,
 		"meta": map[string]interface{}{
 			"totalCount": len(users),
 		},
 	}
+}
+
+// onlineUserListResponse strips the heavy status and marks every user
+// online, the common response shaping of the online listing commands
+func onlineUserListResponse(users []*db.User) interface{} {
+	for _, user := range users {
+		user.Status = nil
+		user.Online = true
+	}
+	return userListResponse(users)
 }
 
 func (self *gateway) ListUsers(ctx context.Context) (interface{}, error) {
@@ -451,11 +480,17 @@ func (self *gateway) ListOnlineUsers(ctx context.Context) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, user := range users {
-		user.Status = nil
-		user.Online = true
+	return onlineUserListResponse(users), nil
+}
+
+func (self *gateway) ListLocalOnlineUsers(ctx context.Context) (interface{}, error) {
+	// only the users connected to this node, taken from the live connection
+	// index, so a single id-set query fetches their records
+	users, err := self.database.GetUsers(ctx, self.connectedUserIds())
+	if err != nil {
+		return nil, err
 	}
-	return userListResponse(users), nil
+	return onlineUserListResponse(users), nil
 }
 
 func (self *gateway) GetUser(ctx context.Context, userId string) (interface{}, error) {
@@ -489,12 +524,6 @@ func (self *gateway) GetUser(ctx context.Context, userId string) (interface{}, e
 }
 
 func (self *gateway) GetUserScreenshot(ctx context.Context, userId string) ([]byte, error) {
-	user, err := self.database.GetUser(ctx, userId)
-	if err != nil {
-		return nil, err
-	}
-	if user == nil {
-		return nil, nil
-	}
-	return user.Screenshot, nil
+	// fetch only the blob instead of the whole row
+	return self.database.GetUserScreenshot(ctx, userId)
 }

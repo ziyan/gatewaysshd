@@ -200,10 +200,9 @@ func (self *connection) getUsedAt() time.Time {
 // }
 
 func (self *connection) reportStatus(status json.RawMessage) error {
-	if _, err := self.gateway.database.PutUser(context.Background(), self.user, func(model *db.User) error {
-		model.Status = db.Status(status)
-		return nil
-	}); err != nil {
+	// targeted update, the frequent reporting path must not read and write
+	// back the whole row over the cross-region tunnel
+	if err := self.gateway.database.UpdateUserStatus(context.Background(), self.user, db.Status(status)); err != nil {
 		log.Errorf("%s: failed to save user in database: %s", self, err)
 		return err
 	}
@@ -211,10 +210,7 @@ func (self *connection) reportStatus(status json.RawMessage) error {
 }
 
 func (self *connection) reportScreenshot(screenshot []byte) error {
-	if _, err := self.gateway.database.PutUser(context.Background(), self.user, func(model *db.User) error {
-		model.Screenshot = screenshot
-		return nil
-	}); err != nil {
+	if err := self.gateway.database.UpdateUserScreenshot(context.Background(), self.user, screenshot); err != nil {
 		log.Errorf("%s: failed to save user in database: %s", self, err)
 		return err
 	}

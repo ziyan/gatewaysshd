@@ -112,6 +112,28 @@ func AcquireDatabase(test *testing.T) (db.Database, func()) {
 	return database, release
 }
 
+// ExecSQL runs a raw statement against the test database, for setting up row
+// states the public Database API cannot produce (e.g. legacy NULL columns).
+func ExecSQL(test *testing.T, settings *db.Settings, query string, arguments ...interface{}) {
+	test.Helper()
+	dsn := fmt.Sprintf(
+		"host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
+		settings.Host, settings.Port, settings.User, settings.Password, settings.DatabaseName,
+	)
+	database, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	if err != nil {
+		test.Fatalf("failed to open test database for raw sql: %s", err)
+	}
+	defer func() {
+		if err := closeDatabase(database); err != nil {
+			test.Fatalf("failed to close test database: %s", err)
+		}
+	}()
+	if err := database.Exec(query, arguments...).Error; err != nil {
+		test.Fatalf("failed to execute %q: %s", query, err)
+	}
+}
+
 // AcquireDatabaseWithSettings is AcquireDatabase but also returns the
 // connection settings, so tests can open additional connections to the same
 // database (e.g. tunneled through a peer node).
