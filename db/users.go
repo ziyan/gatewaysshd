@@ -25,6 +25,10 @@ var userListColumns = []string{
 	"online_at",
 }
 
+// userDetailColumns adds the status blob for the single-user queries; only
+// the screenshot is left out, it is served by GetUserScreenshot alone.
+var userDetailColumns = append(append([]string{}, userListColumns...), "status")
+
 // listUsers returns the users matching the optional conditions, selecting
 // only userListColumns. No transaction wrapper: a single statement is atomic
 // on its own, and the extra BEGIN/COMMIT roundtrips are costly when the
@@ -105,13 +109,26 @@ func (self *database) ClearUserNodeID(ctx context.Context, userId string, nodeId
 
 func (self *database) GetUser(ctx context.Context, userId string) (*User, error) {
 	var model User
-	if err := self.db.WithContext(ctx).Where("id = ?", userId).First(&model).Error; err != nil {
+	if err := self.db.WithContext(ctx).Select(userDetailColumns).Where("id = ?", userId).First(&model).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
 		return nil, err
 	}
 	return &model, nil
+}
+
+// GetUserScreenshot fetches only the screenshot blob, nil when the user is
+// unknown or never reported one.
+func (self *database) GetUserScreenshot(ctx context.Context, userId string) ([]byte, error) {
+	var screenshots [][]byte
+	if err := self.db.WithContext(ctx).Model(&User{}).Where("id = ?", userId).Limit(1).Pluck("screenshot", &screenshots).Error; err != nil {
+		return nil, err
+	}
+	if len(screenshots) == 0 {
+		return nil, nil
+	}
+	return screenshots[0], nil
 }
 
 // GetUserNodeID returns the node the user last connected to, or empty when
@@ -134,7 +151,9 @@ func (self *database) GetUserNodeID(ctx context.Context, userId string) (string,
 // user on first connect and refreshes ip, location and presence (node_id,
 // online_at). Presence is kept unchanged for a disabled user, whose login is
 // rejected right after and must not appear online. A single statement keeps
-// the authentication path at one database roundtrip.
+// the authentication path at one database roundtrip; the returned user
+// reflects the stored row for all light columns (RETURNING), only the status
+// and screenshot blobs are intentionally not fetched.
 func (self *database) UpsertUserOnConnect(ctx context.Context, userId string, ip string, location Location, nodeId string) (*User, error) {
 	now := time.Now().In(time.Local)
 	model := User{
@@ -145,6 +164,10 @@ func (self *database) UpsertUserOnConnect(ctx context.Context, userId string, ip
 		Location:   location,
 		NodeID:     nodeId,
 		OnlineAt:   now,
+	}
+	returningColumns := make([]clause.Column, 0, len(userListColumns))
+	for _, column := range userListColumns {
+		returningColumns = append(returningColumns, clause.Column{Name: column})
 	}
 	if err := self.db.WithContext(ctx).Clauses(
 		clause.OnConflict{
@@ -157,29 +180,39 @@ func (self *database) UpsertUserOnConnect(ctx context.Context, userId string, ip
 				"online_at":   gorm.Expr(`CASE WHEN "user".disabled THEN "user".online_at ELSE excluded.online_at END`),
 			}),
 		},
-		clause.Returning{Columns: []clause.Column{{Name: "administrator"}, {Name: "disabled"}}},
+		clause.Returning{Columns: returningColumns},
 	).Create(&model).Error; err != nil {
 		return nil, err
 	}
 	return &model, nil
 }
 
-// UpdateUserStatus saves only the reported status, a single small statement
-// on the frequently-called reporting path.
-func (self *database) UpdateUserStatus(ctx context.Context, userId string, status Status) error {
-	return self.db.WithContext(ctx).Model(&User{}).Where("id = ?", userId).Updates(map[string]interface{}{
-		"status":      status,
+// updateUserColumn saves a single column of an existing user, one small
+// statement for the frequently-called reporting paths. A report for a user
+// row that vanished is an error instead of a silent no-op.
+func (self *database) updateUserColumn(ctx context.Context, userId string, column string, value interface{}) error {
+	result := self.db.WithContext(ctx).Model(&User{}).Where("id = ?", userId).Updates(map[string]interface{}{
+		column:        value,
 		"modified_at": time.Now().In(time.Local),
-	}).Error
+	})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
-// UpdateUserScreenshot saves only the reported screenshot, a single statement
-// that does not drag the status blob along.
+// UpdateUserStatus saves only the reported status.
+func (self *database) UpdateUserStatus(ctx context.Context, userId string, status Status) error {
+	return self.updateUserColumn(ctx, userId, "status", status)
+}
+
+// UpdateUserScreenshot saves only the reported screenshot, without dragging
+// the status blob along.
 func (self *database) UpdateUserScreenshot(ctx context.Context, userId string, screenshot []byte) error {
-	return self.db.WithContext(ctx).Model(&User{}).Where("id = ?", userId).Updates(map[string]interface{}{
-		"screenshot":  screenshot,
-		"modified_at": time.Now().In(time.Local),
-	}).Error
+	return self.updateUserColumn(ctx, userId, "screenshot", screenshot)
 }
 
 func (self *database) PutUser(ctx context.Context, userId string, modifier func(*User) error) (*User, error) {

@@ -70,8 +70,12 @@ func TestPutUserCreatesAndGetUserRoundTrips(t *testing.T) {
 	if !status["healthy"] {
 		t.Fatalf("unexpected status: %s", user.Status)
 	}
-	if len(user.Screenshot) != 4 {
-		t.Fatalf("unexpected screenshot: %v", user.Screenshot)
+	// the screenshot blob is only served by the dedicated query
+	if len(user.Screenshot) != 0 {
+		t.Fatalf("expected screenshot to be omitted by GetUser, got %v", user.Screenshot)
+	}
+	if screenshot, err := database.GetUserScreenshot(t.Context(), "alice"); err != nil || len(screenshot) != 4 {
+		t.Fatalf("unexpected screenshot %v: %v", screenshot, err)
 	}
 }
 
@@ -266,6 +270,10 @@ func TestUpsertUserOnConnect(t *testing.T) {
 	if !user.Administrator {
 		t.Fatal("expected administrator flag to be returned")
 	}
+	// the returned user reflects the stored row, not the attempted values
+	if !user.CreatedAt.Equal(created.CreatedAt) {
+		t.Fatalf("expected returned creation time to be preserved, got %s != %s", user.CreatedAt, created.CreatedAt)
+	}
 	updated, err := database.GetUser(t.Context(), "alice")
 	if err != nil {
 		t.Fatalf("failed to get updated user: %s", err)
@@ -290,6 +298,10 @@ func TestUpsertUserOnConnect(t *testing.T) {
 	}
 	if !user.Disabled {
 		t.Fatal("expected disabled flag to be returned")
+	}
+	// the returned user reflects the stored row: no presence was recorded
+	if user.NodeID != "" || !user.OnlineAt.IsZero() {
+		t.Fatalf("expected returned user without presence, got %+v", user)
 	}
 	rejected, err := database.GetUser(t.Context(), "mallory")
 	if err != nil {
@@ -328,17 +340,22 @@ func TestUpdateUserStatusAndScreenshot(t *testing.T) {
 	if err := json.Unmarshal(user.Status, &status); err != nil || !status["healthy"] {
 		t.Fatalf("unexpected status %s: %v", user.Status, err)
 	}
-	if len(user.Screenshot) != 2 {
-		t.Fatalf("unexpected screenshot: %v", user.Screenshot)
+	if screenshot, err := database.GetUserScreenshot(t.Context(), "alice"); err != nil || len(screenshot) != 2 {
+		t.Fatalf("unexpected screenshot %v: %v", screenshot, err)
 	}
 	if user.IP != "203.0.113.7" || user.NodeID != "node-a" || user.OnlineAt.IsZero() {
 		t.Fatalf("expected other fields untouched, got %+v", user)
+	}
+
+	// a report for a user row that vanished is an error, not a silent no-op
+	if err := database.UpdateUserStatus(t.Context(), "missing", db.Status(`{}`)); err == nil {
+		t.Fatal("expected error for missing user")
 	}
 }
 
 func TestGetUserNodeID(t *testing.T) {
 	t.Parallel()
-	database, release := dbtest.AcquireDatabase(t)
+	database, settings, release := dbtest.AcquireDatabaseWithSettings(t)
 	defer release()
 
 	// unknown user reads as empty, same as a user without a node
@@ -351,6 +368,13 @@ func TestGetUserNodeID(t *testing.T) {
 	}
 	if nodeId, err := database.GetUserNodeID(t.Context(), "alice"); err != nil || nodeId != "node-a" {
 		t.Fatalf("expected node-a, got %q err %v", nodeId, err)
+	}
+
+	// rows from before the node_id migration hold NULL, which must read as
+	// empty instead of failing the scan
+	dbtest.ExecSQL(t, settings, `UPDATE "user" SET node_id = NULL WHERE id = ?`, "alice")
+	if nodeId, err := database.GetUserNodeID(t.Context(), "alice"); err != nil || nodeId != "" {
+		t.Fatalf("expected empty node for legacy NULL, got %q err %v", nodeId, err)
 	}
 }
 

@@ -36,6 +36,7 @@ type Database interface {
 	ClearUserNodeID(context.Context, string, string) error
 	GetUser(context.Context, string) (*User, error)
 	GetUserNodeID(context.Context, string) (string, error)
+	GetUserScreenshot(context.Context, string) ([]byte, error)
 	UpsertUserOnConnect(context.Context, string, string, Location, string) (*User, error)
 	UpdateUserStatus(context.Context, string, Status) error
 	UpdateUserScreenshot(context.Context, string, []byte) error
