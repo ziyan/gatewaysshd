@@ -142,20 +142,7 @@ func (self *authenticator) authenticate(meta ssh.ConnMetadata, publicKey ssh.Pub
 	// rejected right below and must not appear online
 	userId := meta.User()
 	flags, cached := self.getUserFlags(userId)
-	if cached {
-		// flags from the recent database read decide the login now; the
-		// login is recorded in the background so the session does not wait
-		// on the cross-region write, and the fresh row rolls the cache over
-		go func() {
-			defer deferutil.Recover()
-			user, err := self.database.UpsertUserOnConnect(context.Background(), userId, ip.String(), location, self.settings.NodeID)
-			if err != nil {
-				log.Warningf("failed to record login of user %q: %s", userId, err)
-				return
-			}
-			self.putUserFlags(userId, user)
-		}()
-	} else {
+	if !cached {
 		user, err := self.database.UpsertUserOnConnect(context.Background(), userId, ip.String(), location, self.settings.NodeID)
 		if err != nil {
 			return nil, err
@@ -167,6 +154,23 @@ func (self *authenticator) authenticate(meta ssh.ConnMetadata, publicKey ssh.Pub
 	// check for deactivated user
 	if flags.disabled {
 		return nil, ErrInvalidCredentials
+	}
+
+	if cached {
+		// flags from the recent database read decided the login above; the
+		// login is recorded in the background so the session does not wait
+		// on the cross-region write, and the fresh row rolls the cache over.
+		// this runs only for accepted logins, so a rejection never writes
+		// presence even when the cached flags have gone stale
+		go func() {
+			defer deferutil.Recover()
+			user, err := self.database.UpsertUserOnConnect(context.Background(), userId, ip.String(), location, self.settings.NodeID)
+			if err != nil {
+				log.Warningf("failed to record login of user %q: %s", userId, err)
+				return
+			}
+			self.putUserFlags(userId, user)
+		}()
 	}
 
 	if flags.administrator {
