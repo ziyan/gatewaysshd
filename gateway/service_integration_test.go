@@ -320,13 +320,17 @@ func TestGatewayListOnlineUsers(t *testing.T) {
 		t.Fatalf("failed to create disabled user: %s", err)
 	}
 	extensions := map[string]string{"permit-port-forwarding": ""}
-	if _, err := ssh.Dial("tcp", address, &ssh.ClientConfig{
-		User:            "mallory",
-		Auth:            []ssh.AuthMethod{ssh.PublicKeys(newCertSigner(t, userCaSigner, "mallory", extensions))},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
-		Timeout:         10 * time.Second,
-	}); err == nil {
-		t.Fatal("expected disabled user login to be rejected")
+	// two attempts: the first reads the database, the second is rejected
+	// from the cached flags without waiting on the database
+	for attempt := range 2 {
+		if _, err := ssh.Dial("tcp", address, &ssh.ClientConfig{
+			User:            "mallory",
+			Auth:            []ssh.AuthMethod{ssh.PublicKeys(newCertSigner(t, userCaSigner, "mallory", extensions))},
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
+			Timeout:         10 * time.Second,
+		}); err == nil {
+			t.Fatalf("expected disabled user login attempt %d to be rejected", attempt)
+		}
 	}
 
 	// bob connects (online) and can run the listing commands

@@ -86,6 +86,9 @@ type gateway struct {
 	peers     map[string]*peer
 	peersLock sync.Mutex
 
+	// remembers which node a user is on for mesh tunnel routing
+	routes *routeCache
+
 	// lifetime management for background loops
 	done      chan struct{}
 	closeOnce sync.Once
@@ -101,6 +104,7 @@ func Open(database db.Database, sshConfig *ssh.ServerConfig, settings *Settings)
 		connectionsIndex: make(map[string][]*connection),
 		connectionsList:  make([]*connection, 0),
 		peers:            make(map[string]*peer),
+		routes:           newRouteCache(),
 		done:             make(chan struct{}),
 	}
 	if settings.NodeID != "" {
@@ -242,12 +246,17 @@ func (self *gateway) lookupRemotePeer(ctx context.Context, host string) *peer {
 		if user == "" {
 			continue
 		}
-		nodeId, err := self.database.GetUserNodeID(ctx, user)
-		if err != nil {
-			// a transient error on one candidate must not abort resolving the
-			// remaining, more-specific user suffixes
-			log.Warningf("failed to look up user %q for mesh tunneling: %s", user, err)
-			continue
+		nodeId, cached := self.routes.get(user)
+		if !cached {
+			var err error
+			nodeId, err = self.database.GetUserNodeID(ctx, user)
+			if err != nil {
+				// a transient error on one candidate must not abort resolving
+				// the remaining, more-specific user suffixes
+				log.Warningf("failed to look up user %q for mesh tunneling: %s", user, err)
+				continue
+			}
+			self.routes.put(user, nodeId)
 		}
 		if nodeId == "" || nodeId == self.settings.NodeID {
 			continue
