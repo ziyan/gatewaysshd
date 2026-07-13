@@ -44,11 +44,17 @@ type Settings struct {
 	GeoipDatabase string
 }
 
-// how long the administrator/disabled flags from the last database read are
-// reused: repeat logins within this window do not wait on the cross-region
-// login write, and flag changes in the database take up to this long to
-// apply on this node (kickUser still removes a connected user immediately)
-const userFlagsTimeToLive = time.Minute
+const (
+	// how long the administrator/disabled flags from the last database read
+	// are reused: repeat logins within this window do not wait on the
+	// cross-region login write, and flag changes in the database take up to
+	// this long to apply on this node (kickUser still removes a connected
+	// user immediately and drops these cached flags)
+	userFlagsTimeToLive = time.Minute
+
+	// usernames come from ca-signed certificates, but bound the cache anyway
+	userFlagsMaxEntries = 4096
+)
 
 // NewConfig builds the ssh server config. It also returns a function that
 // revokes a user's cached login flags, so kicking a user forces their next
@@ -87,7 +93,11 @@ func (self *authenticator) getUserFlags(userId string) (userFlags, bool) {
 	defer self.userFlagsLock.Unlock()
 
 	flags, ok := self.userFlags[userId]
-	if !ok || time.Now().After(flags.expiresAt) {
+	if !ok {
+		return userFlags{}, false
+	}
+	if time.Now().After(flags.expiresAt) {
+		delete(self.userFlags, userId)
 		return userFlags{}, false
 	}
 	return flags, true
@@ -97,6 +107,18 @@ func (self *authenticator) putUserFlags(userId string, user *db.User) {
 	self.userFlagsLock.Lock()
 	defer self.userFlagsLock.Unlock()
 
+	if len(self.userFlags) >= userFlagsMaxEntries {
+		// drop expired entries, and reset wholesale if everything is fresh
+		now := time.Now()
+		for key, flags := range self.userFlags {
+			if now.After(flags.expiresAt) {
+				delete(self.userFlags, key)
+			}
+		}
+		if len(self.userFlags) >= userFlagsMaxEntries {
+			self.userFlags = make(map[string]userFlags)
+		}
+	}
 	self.userFlags[userId] = userFlags{
 		administrator: user.Administrator,
 		disabled:      user.Disabled,

@@ -260,18 +260,23 @@ func (self *gateway) lookupRemotePeer(ctx context.Context, host string) *peer {
 				log.Warningf("failed to look up user %q for mesh tunneling: %s", user, err)
 				continue
 			}
-			if nodeId != "" && nodeId != self.settings.NodeID {
-				// only remember routable results: a user without a node may
-				// connect somewhere any moment and must be seen immediately
-				self.routes.put(user, nodeId)
-			}
 		}
 		if nodeId == "" || nodeId == self.settings.NodeID {
 			continue
 		}
 		if peer := self.getPeer(nodeId); peer != nil {
+			if !cached {
+				// only remember usable routes: a user without a node, or on a
+				// node without a live peer connection, may become routable any
+				// moment and must be seen immediately
+				self.routes.put(user, nodeId)
+			}
 			log.Debugf("lookup: found remote node for host %q: node = %s", host, nodeId)
 			return peer
+		}
+		if cached {
+			// the peer went away after the route was cached
+			self.routes.invalidate(user)
 		}
 		log.Debugf("lookup: user %q is on node %s but no peer connection is available", user, nodeId)
 	}
