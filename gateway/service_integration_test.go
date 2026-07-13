@@ -432,6 +432,57 @@ func TestGatewayListOnlineUsersMeshWide(t *testing.T) {
 	}
 }
 
+// TestGatewayCachedLoginReconnect proves a repeat login within the flag
+// cache lifetime is accepted from the cached flags, with the login recorded
+// in the background.
+func TestGatewayCachedLoginReconnect(t *testing.T) {
+	t.Parallel()
+	database, release := dbtest.AcquireDatabase(t)
+	defer release()
+
+	peerCaSigner := newTestSigner(t)
+	userCaSigner := newTestSigner(t)
+	address, _, releaseNode := startTestNode(t, database, userCaSigner, peerCaSigner, "node-a", "")
+	defer releaseNode()
+
+	extensions := map[string]string{"permit-port-forwarding": ""}
+	signer := newCertSigner(t, userCaSigner, "bob", extensions)
+
+	// first login reads the database and primes the cache
+	bob := dialTestGateway(t, address, signer, "bob")
+	if output := runCommand(t, bob, "version"); output == "" {
+		t.Fatal("expected version output")
+	}
+	if err := bob.Close(); err != nil {
+		t.Fatalf("failed to close first connection: %s", err)
+	}
+
+	// the reconnect is decided from the cached flags and stays functional
+	bob = dialTestGateway(t, address, signer, "bob")
+	defer func() {
+		_ = bob.Close()
+	}()
+	if output := runCommand(t, bob, "version"); output == "" {
+		t.Fatal("expected version output on cached reconnect")
+	}
+
+	// the background login record lands in the database
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		user, err := database.GetUser(t.Context(), "bob")
+		if err != nil {
+			t.Fatalf("failed to get user: %s", err)
+		}
+		if user != nil && user.NodeID == "node-a" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected background login record, got %+v", user)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 // TestGatewayReleasesUserNodeOnDisconnect proves the user's node_id is
 // released when their last connection to the node closes, so a node they are
 // still connected to can adopt them on its next heartbeat.
