@@ -1,7 +1,7 @@
 package main
 
 // major, minor, patch
-var Version string = "0.9.1"
+var Version string = "0.9.2"
 
 // git commit hash
 var Commit string

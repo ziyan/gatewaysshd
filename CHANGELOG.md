@@ -14,6 +14,31 @@ requests.
 
 
 
+
+## 0.9.2 (2026-07-13)
+
+### Changed
+
+- Remote nodes cache mesh routes (15s) and login flags (60s), so tunnel (#17)
+  opens and repeat logins no longer wait on cross-region database roundtrips (#17)
+
+<details>
+<summary>Commit summary (auto-generated)</summary>
+
+### Bug Fixes
+
+* **auth:** only record cached logins after they are accepted ([aa15060](https://github.com/ziyan/gatewaysshd/commit/aa15060fd4f8c4fe6bd5f550644414393c0601b9))
+* **gateway:** forget a cached route when the peer rejects the tunnel ([df3908f](https://github.com/ziyan/gatewaysshd/commit/df3908f763b89f660a4362791f433786f5fe179b))
+* **gateway:** kick revokes cached login flags, only cache routable routes ([34bff82](https://github.com/ziyan/gatewaysshd/commit/34bff82e8ee7c030b9c33e539b441a95a4f7f7a8))
+* **gateway:** only cache usable routes, bound the login flag cache ([910b259](https://github.com/ziyan/gatewaysshd/commit/910b259320c5445743e66d6b4bae62157dd0140f))
+
+
+### Performance Improvements
+
+* **gateway:** cache mesh routes and login flags on remote nodes ([28676b6](https://github.com/ziyan/gatewaysshd/commit/28676b662f10b67a5ded4bc41f0d76810663e813))
+
+</details>
+
 ## 0.9.1 (2026-07-06)
 
 ### Changed
