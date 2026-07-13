@@ -56,6 +56,10 @@ type Settings struct {
 	// heartbeat, defaults to 15 seconds; must stay well below
 	// onlineStaleThreshold or other nodes will consider this node dead
 	PeerDiscoveryInterval time.Duration
+
+	// revokes a user's cached login flags on this node, called by kickUser
+	// so a kicked user's next login re-reads the database, optional
+	RevokeLoginFlags func(userId string)
 }
 
 // an instance of gateway, contains runtime states
@@ -86,6 +90,9 @@ type gateway struct {
 	peers     map[string]*peer
 	peersLock sync.Mutex
 
+	// remembers which node a user is on for mesh tunnel routing
+	routes *routeCache
+
 	// lifetime management for background loops
 	done      chan struct{}
 	closeOnce sync.Once
@@ -101,6 +108,7 @@ func Open(database db.Database, sshConfig *ssh.ServerConfig, settings *Settings)
 		connectionsIndex: make(map[string][]*connection),
 		connectionsList:  make([]*connection, 0),
 		peers:            make(map[string]*peer),
+		routes:           newRouteCache(),
 		done:             make(chan struct{}),
 	}
 	if settings.NodeID != "" {
@@ -242,19 +250,33 @@ func (self *gateway) lookupRemotePeer(ctx context.Context, host string) *peer {
 		if user == "" {
 			continue
 		}
-		nodeId, err := self.database.GetUserNodeID(ctx, user)
-		if err != nil {
-			// a transient error on one candidate must not abort resolving the
-			// remaining, more-specific user suffixes
-			log.Warningf("failed to look up user %q for mesh tunneling: %s", user, err)
-			continue
+		nodeId, cached := self.routes.get(user)
+		if !cached {
+			var err error
+			nodeId, err = self.database.GetUserNodeID(ctx, user)
+			if err != nil {
+				// a transient error on one candidate must not abort resolving
+				// the remaining, more-specific user suffixes
+				log.Warningf("failed to look up user %q for mesh tunneling: %s", user, err)
+				continue
+			}
 		}
 		if nodeId == "" || nodeId == self.settings.NodeID {
 			continue
 		}
 		if peer := self.getPeer(nodeId); peer != nil {
+			if !cached {
+				// only remember usable routes: a user without a node, or on a
+				// node without a live peer connection, may become routable any
+				// moment and must be seen immediately
+				self.routes.put(user, nodeId)
+			}
 			log.Debugf("lookup: found remote node for host %q: node = %s", host, nodeId)
 			return peer
+		}
+		if cached {
+			// the peer went away after the route was cached
+			self.routes.invalidate(user)
 		}
 		log.Debugf("lookup: user %q is on node %s but no peer connection is available", user, nodeId)
 	}
@@ -285,14 +307,33 @@ func (self *gateway) openServiceTunnel(host string, port uint16, originAddress s
 	remotePeer := self.lookupRemotePeer(lookupContext, host)
 	cancel()
 	if remotePeer != nil {
-		return remotePeer.openTunnel("direct-tcpip", marshalTunnelData(&tunnelData{
+		tunnel, err := remotePeer.openTunnel("direct-tcpip", marshalTunnelData(&tunnelData{
 			Host:          host,
 			Port:          uint32(port),
 			OriginAddress: originAddress,
 			OriginPort:    originPort,
 		}), metadata)
+		if err != nil {
+			// the user may have left that node, forget the cached route so
+			// the next attempt re-reads the database
+			self.invalidateRoutes(host)
+		}
+		return tunnel, err
 	}
 	return nil, ErrServiceNotFound
+}
+
+// invalidateRoutes forgets the cached routes for the host's user candidates,
+// called after a peer rejected a tunnel so a stale route is not retried for
+// the rest of its lifetime.
+func (self *gateway) invalidateRoutes(host string) {
+	parts := strings.Split(host, ".")
+	for index := range parts {
+		user := strings.Join(parts[index:], ".")
+		if user != "" {
+			self.routes.invalidate(user)
+		}
+	}
 }
 
 // returns a list of connections
@@ -317,6 +358,11 @@ func (self *gateway) ScavengeConnections(timeout time.Duration) {
 }
 
 func (self *gateway) kickUser(user string) error {
+	// a kick is the immediate removal tool: also drop the user's cached
+	// login flags so an instant reconnect re-reads the database
+	if self.settings.RevokeLoginFlags != nil {
+		self.settings.RevokeLoginFlags(user)
+	}
 	for _, connection := range self.listConnections() {
 		if connection.user == user {
 			log.Infof("kick: closing connection %s", connection)

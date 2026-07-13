@@ -67,7 +67,7 @@ func startTestGateway(t *testing.T) (string, ssh.Signer, gateway.Gateway, db.Dat
 	database, releaseDatabase := dbtest.AcquireDatabase(t)
 
 	caSigner := newTestSigner(t)
-	sshConfig, err := auth.NewConfig(database, &auth.Settings{
+	sshConfig, revokeLoginFlags, err := auth.NewConfig(database, &auth.Settings{
 		CAPublicKeys:  []ssh.PublicKey{caSigner.PublicKey()},
 		GeoipDatabase: "missing-geoip.mmdb",
 	})
@@ -76,7 +76,10 @@ func startTestGateway(t *testing.T) (string, ssh.Signer, gateway.Gateway, db.Dat
 	}
 	sshConfig.AddHostKey(newTestSigner(t))
 
-	instance, err := gateway.Open(database, sshConfig, &gateway.Settings{Version: "test"})
+	instance, err := gateway.Open(database, sshConfig, &gateway.Settings{
+		Version:          "test",
+		RevokeLoginFlags: revokeLoginFlags,
+	})
 	if err != nil {
 		t.Fatalf("failed to open gateway: %s", err)
 	}

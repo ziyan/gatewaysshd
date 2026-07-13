@@ -291,6 +291,24 @@ func TestGatewayKickUserRequiresAdministrator(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("expected victim connection to be closed")
 	}
+
+	// a kick also revokes the victim's cached login flags: disabled in the
+	// database and kicked, the victim cannot ride the cache back in
+	if _, err := database.PutUser(t.Context(), "victim", func(user *db.User) error {
+		user.Disabled = true
+		return nil
+	}); err != nil {
+		t.Fatalf("failed to disable victim: %s", err)
+	}
+	_ = runCommand(t, root, "kickUser victim")
+	if _, err := ssh.Dial("tcp", address, &ssh.ClientConfig{
+		User:            "victim",
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(newCertSigner(t, caSigner, "victim", extensions))},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
+		Timeout:         10 * time.Second,
+	}); err == nil {
+		t.Fatal("expected kicked and disabled victim to be rejected")
+	}
 }
 
 // TestGatewayListOnlineUsers proves listOnlineUsers returns only currently
@@ -320,13 +338,17 @@ func TestGatewayListOnlineUsers(t *testing.T) {
 		t.Fatalf("failed to create disabled user: %s", err)
 	}
 	extensions := map[string]string{"permit-port-forwarding": ""}
-	if _, err := ssh.Dial("tcp", address, &ssh.ClientConfig{
-		User:            "mallory",
-		Auth:            []ssh.AuthMethod{ssh.PublicKeys(newCertSigner(t, userCaSigner, "mallory", extensions))},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
-		Timeout:         10 * time.Second,
-	}); err == nil {
-		t.Fatal("expected disabled user login to be rejected")
+	// two attempts: the first reads the database, the second is rejected
+	// from the cached flags without waiting on the database
+	for attempt := range 2 {
+		if _, err := ssh.Dial("tcp", address, &ssh.ClientConfig{
+			User:            "mallory",
+			Auth:            []ssh.AuthMethod{ssh.PublicKeys(newCertSigner(t, userCaSigner, "mallory", extensions))},
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
+			Timeout:         10 * time.Second,
+		}); err == nil {
+			t.Fatalf("expected disabled user login attempt %d to be rejected", attempt)
+		}
 	}
 
 	// bob connects (online) and can run the listing commands
@@ -407,6 +429,57 @@ func TestGatewayListOnlineUsersMeshWide(t *testing.T) {
 	local := parseUserList(t, bob, "listLocalOnlineUsers")
 	if local.Meta.TotalCount != 1 || local.Users[0].ID != "bob" || !local.Users[0].Online {
 		t.Fatalf("expected only bob connected locally, got %+v", local.Users)
+	}
+}
+
+// TestGatewayCachedLoginReconnect proves a repeat login within the flag
+// cache lifetime is accepted from the cached flags, with the login recorded
+// in the background.
+func TestGatewayCachedLoginReconnect(t *testing.T) {
+	t.Parallel()
+	database, release := dbtest.AcquireDatabase(t)
+	defer release()
+
+	peerCaSigner := newTestSigner(t)
+	userCaSigner := newTestSigner(t)
+	address, _, releaseNode := startTestNode(t, database, userCaSigner, peerCaSigner, "node-a", "")
+	defer releaseNode()
+
+	extensions := map[string]string{"permit-port-forwarding": ""}
+	signer := newCertSigner(t, userCaSigner, "bob", extensions)
+
+	// first login reads the database and primes the cache
+	bob := dialTestGateway(t, address, signer, "bob")
+	if output := runCommand(t, bob, "version"); output == "" {
+		t.Fatal("expected version output")
+	}
+	if err := bob.Close(); err != nil {
+		t.Fatalf("failed to close first connection: %s", err)
+	}
+
+	// the reconnect is decided from the cached flags and stays functional
+	bob = dialTestGateway(t, address, signer, "bob")
+	defer func() {
+		_ = bob.Close()
+	}()
+	if output := runCommand(t, bob, "version"); output == "" {
+		t.Fatal("expected version output on cached reconnect")
+	}
+
+	// the background login record lands in the database
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		user, err := database.GetUser(t.Context(), "bob")
+		if err != nil {
+			t.Fatalf("failed to get user: %s", err)
+		}
+		if user != nil && user.NodeID == "node-a" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected background login record, got %+v", user)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 

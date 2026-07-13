@@ -6,12 +6,15 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"sync"
+	"time"
 
 	logging "github.com/op/go-logging"
 	geoip2 "github.com/oschwald/geoip2-golang/v2"
 	"golang.org/x/crypto/ssh"
 
 	"github.com/ziyan/gatewaysshd/db"
+	"github.com/ziyan/gatewaysshd/util/deferutil"
 )
 
 var log = logging.MustGetLogger("auth")
@@ -41,21 +44,93 @@ type Settings struct {
 	GeoipDatabase string
 }
 
-func NewConfig(database db.Database, settings *Settings) (*ssh.ServerConfig, error) {
+const (
+	// how long the administrator/disabled flags from the last database read
+	// are reused: repeat logins within this window do not wait on the
+	// cross-region login write, and flag changes in the database take up to
+	// this long to apply on this node (kickUser still removes a connected
+	// user immediately and drops these cached flags)
+	userFlagsTimeToLive = time.Minute
+
+	// usernames come from ca-signed certificates, but bound the cache anyway
+	userFlagsMaxEntries = 4096
+)
+
+// NewConfig builds the ssh server config. It also returns a function that
+// revokes a user's cached login flags, so kicking a user forces their next
+// login to re-read the database instead of reusing recent flags.
+func NewConfig(database db.Database, settings *Settings) (*ssh.ServerConfig, func(string), error) {
 	authenticator := &authenticator{
-		database: database,
-		settings: settings,
+		database:  database,
+		settings:  settings,
+		userFlags: make(map[string]userFlags),
 	}
 	config := &ssh.ServerConfig{
 		PublicKeyCallback: authenticator.authenticate,
 		AuthLogCallback:   authenticator.log,
 	}
-	return config, nil
+	return config, authenticator.revokeUserFlags, nil
+}
+
+// userFlags caches the account flags a login decision needs
+type userFlags struct {
+	administrator bool
+	disabled      bool
+	expiresAt     time.Time
 }
 
 type authenticator struct {
 	database db.Database
 	settings *Settings
+
+	// per-user flags from the last database read, protected by userFlagsLock
+	userFlags     map[string]userFlags
+	userFlagsLock sync.Mutex
+}
+
+func (self *authenticator) getUserFlags(userId string) (userFlags, bool) {
+	self.userFlagsLock.Lock()
+	defer self.userFlagsLock.Unlock()
+
+	flags, ok := self.userFlags[userId]
+	if !ok {
+		return userFlags{}, false
+	}
+	if time.Now().After(flags.expiresAt) {
+		delete(self.userFlags, userId)
+		return userFlags{}, false
+	}
+	return flags, true
+}
+
+func (self *authenticator) putUserFlags(userId string, user *db.User) {
+	self.userFlagsLock.Lock()
+	defer self.userFlagsLock.Unlock()
+
+	if len(self.userFlags) >= userFlagsMaxEntries {
+		// drop expired entries, and reset wholesale if everything is fresh
+		now := time.Now()
+		for key, flags := range self.userFlags {
+			if now.After(flags.expiresAt) {
+				delete(self.userFlags, key)
+			}
+		}
+		if len(self.userFlags) >= userFlagsMaxEntries {
+			self.userFlags = make(map[string]userFlags)
+		}
+	}
+	self.userFlags[userId] = userFlags{
+		administrator: user.Administrator,
+		disabled:      user.Disabled,
+		expiresAt:     time.Now().Add(userFlagsTimeToLive),
+	}
+}
+
+func (self *authenticator) revokeUserFlags(userId string) {
+	self.userFlagsLock.Lock()
+	defer self.userFlagsLock.Unlock()
+
+	delete(self.userFlags, userId)
 }
 
 func (self *authenticator) authenticate(meta ssh.ConnMetadata, publicKey ssh.PublicKey) (*ssh.Permissions, error) {
@@ -94,20 +169,43 @@ func (self *authenticator) authenticate(meta ssh.ConnMetadata, publicKey ssh.Pub
 	delete(permissions.Extensions, "identity")
 
 	// update user in database, a single upsert so the authentication path
-	// costs one database roundtrip; presence (node_id, online_at) is only
-	// recorded for logins that will be accepted, a disabled user is rejected
-	// right below and must not appear online
-	user, err := self.database.UpsertUserOnConnect(context.Background(), meta.User(), ip.String(), location, self.settings.NodeID)
-	if err != nil {
-		return nil, err
+	// costs at most one database roundtrip; presence (node_id, online_at) is
+	// only recorded for logins that will be accepted, a disabled user is
+	// rejected right below and must not appear online
+	userId := meta.User()
+	flags, cached := self.getUserFlags(userId)
+	if !cached {
+		user, err := self.database.UpsertUserOnConnect(context.Background(), userId, ip.String(), location, self.settings.NodeID)
+		if err != nil {
+			return nil, err
+		}
+		self.putUserFlags(userId, user)
+		flags = userFlags{administrator: user.Administrator, disabled: user.Disabled}
 	}
 
 	// check for deactivated user
-	if user.Disabled {
+	if flags.disabled {
 		return nil, ErrInvalidCredentials
 	}
 
-	if user.Administrator {
+	if cached {
+		// flags from the recent database read decided the login above; the
+		// login is recorded in the background so the session does not wait
+		// on the cross-region write, and the fresh row rolls the cache over.
+		// this runs only for accepted logins, so a rejection never writes
+		// presence even when the cached flags have gone stale
+		go func() {
+			defer deferutil.Recover()
+			user, err := self.database.UpsertUserOnConnect(context.Background(), userId, ip.String(), location, self.settings.NodeID)
+			if err != nil {
+				log.Warningf("failed to record login of user %q: %s", userId, err)
+				return
+			}
+			self.putUserFlags(userId, user)
+		}()
+	}
+
+	if flags.administrator {
 		permissions.Extensions["administrator"] = ""
 	}
 

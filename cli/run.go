@@ -155,7 +155,7 @@ func run(ctx context.Context, command *cli.Command) error {
 	}
 
 	// create ssh auth config
-	sshConfig, err := auth.NewConfig(database, &auth.Settings{
+	sshConfig, revokeLoginFlags, err := auth.NewConfig(database, &auth.Settings{
 		CAPublicKeys:     caPublicKeys,
 		PeerCAPublicKeys: peerCaPublicKeys,
 		NodeID:           command.String("node-id"),
@@ -184,12 +184,13 @@ func run(ctx context.Context, command *cli.Command) error {
 
 	// create gateway
 	gateway, err := gateway.Open(database, sshConfig, &gateway.Settings{
-		Version:         command.Root().Version,
-		NodeID:          command.String("node-id"),
-		NodeAddress:     command.String("node-address"),
-		HostPublicKey:   hostPublicKey,
-		NodeSigner:      nodeSigner,
-		PostgresAddress: postgresAddress,
+		Version:          command.Root().Version,
+		NodeID:           command.String("node-id"),
+		NodeAddress:      command.String("node-address"),
+		HostPublicKey:    hostPublicKey,
+		NodeSigner:       nodeSigner,
+		PostgresAddress:  postgresAddress,
+		RevokeLoginFlags: revokeLoginFlags,
 	})
 	if err != nil {
 		log.Errorf("failed to create ssh gateway: %s", err)

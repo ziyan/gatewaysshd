@@ -556,6 +556,11 @@ func (self *connection) handleTunnelChannel(newChannel ssh.NewChannel) (bool, ss
 		})
 		if err != nil {
 			log.Warningf("%s: failed to open tunnel to %s via %s: %s", self, data.Host, target, err)
+			if remotePeer != nil {
+				// the user may have left that node, forget the cached route
+				// so the next attempt re-reads the database
+				self.gateway.invalidateRoutes(data.Host)
+			}
 			return
 		}
 		defer otherTunnel.close()

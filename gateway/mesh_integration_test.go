@@ -47,7 +47,7 @@ func startTestNode(t *testing.T, database db.Database, userCaSigner, peerCaSigne
 	t.Helper()
 
 	hostSigner := newTestSigner(t)
-	sshConfig, err := auth.NewConfig(database, &auth.Settings{
+	sshConfig, revokeLoginFlags, err := auth.NewConfig(database, &auth.Settings{
 		CAPublicKeys:     []ssh.PublicKey{userCaSigner.PublicKey()},
 		PeerCAPublicKeys: []ssh.PublicKey{peerCaSigner.PublicKey()},
 		NodeID:           nodeId,
@@ -72,6 +72,7 @@ func startTestNode(t *testing.T, database db.Database, userCaSigner, peerCaSigne
 		NodeSigner:            newNodeCertSigner(t, peerCaSigner, nodeId),
 		PostgresAddress:       postgresAddress,
 		PeerDiscoveryInterval: 200 * time.Millisecond,
+		RevokeLoginFlags:      revokeLoginFlags,
 	})
 	if err != nil {
 		t.Fatalf("failed to open gateway node %s: %s", nodeId, err)
@@ -198,6 +199,38 @@ func TestGatewayMeshTunnel(t *testing.T) {
 	if !bytes.Equal(echo, message) {
 		t.Fatalf("expected %q, got %q", message, echo)
 	}
+
+	// a second tunnel rides the cached route, no database lookup involved
+	tunnel, err := bob.Dial("tcp", "myservice.alice:8000")
+	if err != nil {
+		t.Fatalf("failed to open second tunnel via cached route: %s", err)
+	}
+	if _, err := tunnel.Write(message); err != nil {
+		t.Fatalf("failed to write via cached route: %s", err)
+	}
+	if _, err := io.ReadFull(tunnel, echo); err != nil {
+		t.Fatalf("failed to echo via cached route: %s", err)
+	}
+	_ = tunnel.Close()
+	if !bytes.Equal(echo, message) {
+		t.Fatalf("expected %q via cached route, got %q", message, echo)
+	}
+
+	// a tunnel the remote node rejects invalidates the cached route (it dials
+	// successfully and surfaces as EOF on first use); the next open re-reads
+	// the database and succeeds again
+	rejected, err := bob.Dial("tcp", "nosuchservice.alice:9999")
+	if err == nil {
+		if _, err := rejected.Read(make([]byte, 1)); err == nil {
+			t.Fatal("expected tunnel to unadvertised service to fail")
+		}
+		_ = rejected.Close()
+	}
+	tunnel, err = bob.Dial("tcp", "myservice.alice:8000")
+	if err != nil {
+		t.Fatalf("failed to reopen tunnel after invalidation: %s", err)
+	}
+	_ = tunnel.Close()
 }
 
 // TestGatewayPostgresViaPeer proves a node without direct database access can
@@ -211,7 +244,7 @@ func TestGatewayPostgresViaPeer(t *testing.T) {
 	userCaSigner := newTestSigner(t)
 
 	hostSigner := newTestSigner(t)
-	sshConfig, err := auth.NewConfig(database, &auth.Settings{
+	sshConfig, _, err := auth.NewConfig(database, &auth.Settings{
 		CAPublicKeys:     []ssh.PublicKey{userCaSigner.PublicKey()},
 		PeerCAPublicKeys: []ssh.PublicKey{peerCaSigner.PublicKey()},
 		NodeID:           "node-central",
