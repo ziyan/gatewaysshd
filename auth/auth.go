@@ -50,7 +50,10 @@ type Settings struct {
 // apply on this node (kickUser still removes a connected user immediately)
 const userFlagsTimeToLive = time.Minute
 
-func NewConfig(database db.Database, settings *Settings) (*ssh.ServerConfig, error) {
+// NewConfig builds the ssh server config. It also returns a function that
+// revokes a user's cached login flags, so kicking a user forces their next
+// login to re-read the database instead of reusing recent flags.
+func NewConfig(database db.Database, settings *Settings) (*ssh.ServerConfig, func(string), error) {
 	authenticator := &authenticator{
 		database:  database,
 		settings:  settings,
@@ -60,7 +63,7 @@ func NewConfig(database db.Database, settings *Settings) (*ssh.ServerConfig, err
 		PublicKeyCallback: authenticator.authenticate,
 		AuthLogCallback:   authenticator.log,
 	}
-	return config, nil
+	return config, authenticator.revokeUserFlags, nil
 }
 
 // userFlags caches the account flags a login decision needs
@@ -99,6 +102,13 @@ func (self *authenticator) putUserFlags(userId string, user *db.User) {
 		disabled:      user.Disabled,
 		expiresAt:     time.Now().Add(userFlagsTimeToLive),
 	}
+}
+
+func (self *authenticator) revokeUserFlags(userId string) {
+	self.userFlagsLock.Lock()
+	defer self.userFlagsLock.Unlock()
+
+	delete(self.userFlags, userId)
 }
 
 func (self *authenticator) authenticate(meta ssh.ConnMetadata, publicKey ssh.PublicKey) (*ssh.Permissions, error) {

@@ -47,7 +47,7 @@ func startTestNode(t *testing.T, database db.Database, userCaSigner, peerCaSigne
 	t.Helper()
 
 	hostSigner := newTestSigner(t)
-	sshConfig, err := auth.NewConfig(database, &auth.Settings{
+	sshConfig, revokeLoginFlags, err := auth.NewConfig(database, &auth.Settings{
 		CAPublicKeys:     []ssh.PublicKey{userCaSigner.PublicKey()},
 		PeerCAPublicKeys: []ssh.PublicKey{peerCaSigner.PublicKey()},
 		NodeID:           nodeId,
@@ -72,6 +72,7 @@ func startTestNode(t *testing.T, database db.Database, userCaSigner, peerCaSigne
 		NodeSigner:            newNodeCertSigner(t, peerCaSigner, nodeId),
 		PostgresAddress:       postgresAddress,
 		PeerDiscoveryInterval: 200 * time.Millisecond,
+		RevokeLoginFlags:      revokeLoginFlags,
 	})
 	if err != nil {
 		t.Fatalf("failed to open gateway node %s: %s", nodeId, err)
@@ -211,7 +212,7 @@ func TestGatewayPostgresViaPeer(t *testing.T) {
 	userCaSigner := newTestSigner(t)
 
 	hostSigner := newTestSigner(t)
-	sshConfig, err := auth.NewConfig(database, &auth.Settings{
+	sshConfig, _, err := auth.NewConfig(database, &auth.Settings{
 		CAPublicKeys:     []ssh.PublicKey{userCaSigner.PublicKey()},
 		PeerCAPublicKeys: []ssh.PublicKey{peerCaSigner.PublicKey()},
 		NodeID:           "node-central",

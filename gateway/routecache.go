@@ -21,9 +21,9 @@ type routeCacheEntry struct {
 	expiresAt time.Time
 }
 
-// routeCache remembers which node a user is on, including unknown users as
-// empty negative entries, so repeated mesh tunnel opens cost no database
-// roundtrip.
+// routeCache remembers which remote node a user is on, so repeated mesh
+// tunnel opens cost no database roundtrip. Callers only store routable
+// results, a user without a node must be noticed the moment they connect.
 type routeCache struct {
 	entries map[string]routeCacheEntry
 	lock    sync.Mutex

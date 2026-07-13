@@ -291,6 +291,24 @@ func TestGatewayKickUserRequiresAdministrator(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("expected victim connection to be closed")
 	}
+
+	// a kick also revokes the victim's cached login flags: disabled in the
+	// database and kicked, the victim cannot ride the cache back in
+	if _, err := database.PutUser(t.Context(), "victim", func(user *db.User) error {
+		user.Disabled = true
+		return nil
+	}); err != nil {
+		t.Fatalf("failed to disable victim: %s", err)
+	}
+	_ = runCommand(t, root, "kickUser victim")
+	if _, err := ssh.Dial("tcp", address, &ssh.ClientConfig{
+		User:            "victim",
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(newCertSigner(t, caSigner, "victim", extensions))},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
+		Timeout:         10 * time.Second,
+	}); err == nil {
+		t.Fatal("expected kicked and disabled victim to be rejected")
+	}
 }
 
 // TestGatewayListOnlineUsers proves listOnlineUsers returns only currently

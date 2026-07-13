@@ -56,6 +56,10 @@ type Settings struct {
 	// heartbeat, defaults to 15 seconds; must stay well below
 	// onlineStaleThreshold or other nodes will consider this node dead
 	PeerDiscoveryInterval time.Duration
+
+	// revokes a user's cached login flags on this node, called by kickUser
+	// so a kicked user's next login re-reads the database, optional
+	RevokeLoginFlags func(userId string)
 }
 
 // an instance of gateway, contains runtime states
@@ -256,7 +260,11 @@ func (self *gateway) lookupRemotePeer(ctx context.Context, host string) *peer {
 				log.Warningf("failed to look up user %q for mesh tunneling: %s", user, err)
 				continue
 			}
-			self.routes.put(user, nodeId)
+			if nodeId != "" && nodeId != self.settings.NodeID {
+				// only remember routable results: a user without a node may
+				// connect somewhere any moment and must be seen immediately
+				self.routes.put(user, nodeId)
+			}
 		}
 		if nodeId == "" || nodeId == self.settings.NodeID {
 			continue
@@ -326,6 +334,11 @@ func (self *gateway) ScavengeConnections(timeout time.Duration) {
 }
 
 func (self *gateway) kickUser(user string) error {
+	// a kick is the immediate removal tool: also drop the user's cached
+	// login flags so an instant reconnect re-reads the database
+	if self.settings.RevokeLoginFlags != nil {
+		self.settings.RevokeLoginFlags(user)
+	}
 	for _, connection := range self.listConnections() {
 		if connection.user == user {
 			log.Infof("kick: closing connection %s", connection)

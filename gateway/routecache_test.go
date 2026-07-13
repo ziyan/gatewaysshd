@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func TestRouteCacheHitAndNegativeEntry(t *testing.T) {
+func TestRouteCacheHitAndMiss(t *testing.T) {
 	routes := newRouteCache()
 
 	if _, ok := routes.get("alice"); ok {
@@ -16,12 +16,6 @@ func TestRouteCacheHitAndNegativeEntry(t *testing.T) {
 	routes.put("alice", "node-a")
 	if nodeId, ok := routes.get("alice"); !ok || nodeId != "node-a" {
 		t.Fatalf("expected node-a hit, got %q %v", nodeId, ok)
-	}
-
-	// unknown users are remembered too, as empty entries
-	routes.put("ghost", "")
-	if nodeId, ok := routes.get("ghost"); !ok || nodeId != "" {
-		t.Fatalf("expected empty negative hit, got %q %v", nodeId, ok)
 	}
 }
 
