@@ -302,14 +302,33 @@ func (self *gateway) openServiceTunnel(host string, port uint16, originAddress s
 	remotePeer := self.lookupRemotePeer(lookupContext, host)
 	cancel()
 	if remotePeer != nil {
-		return remotePeer.openTunnel("direct-tcpip", marshalTunnelData(&tunnelData{
+		tunnel, err := remotePeer.openTunnel("direct-tcpip", marshalTunnelData(&tunnelData{
 			Host:          host,
 			Port:          uint32(port),
 			OriginAddress: originAddress,
 			OriginPort:    originPort,
 		}), metadata)
+		if err != nil {
+			// the user may have left that node, forget the cached route so
+			// the next attempt re-reads the database
+			self.invalidateRoutes(host)
+		}
+		return tunnel, err
 	}
 	return nil, ErrServiceNotFound
+}
+
+// invalidateRoutes forgets the cached routes for the host's user candidates,
+// called after a peer rejected a tunnel so a stale route is not retried for
+// the rest of its lifetime.
+func (self *gateway) invalidateRoutes(host string) {
+	parts := strings.Split(host, ".")
+	for index := range parts {
+		user := strings.Join(parts[index:], ".")
+		if user != "" {
+			self.routes.invalidate(user)
+		}
+	}
 }
 
 // returns a list of connections

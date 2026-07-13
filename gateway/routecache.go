@@ -46,6 +46,13 @@ func (self *routeCache) get(userId string) (string, bool) {
 	return entry.nodeId, true
 }
 
+func (self *routeCache) invalidate(userId string) {
+	self.lock.Lock()
+	defer self.lock.Unlock()
+
+	delete(self.entries, userId)
+}
+
 func (self *routeCache) put(userId string, nodeId string) {
 	self.lock.Lock()
 	defer self.lock.Unlock()

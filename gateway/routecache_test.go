@@ -17,6 +17,12 @@ func TestRouteCacheHitAndMiss(t *testing.T) {
 	if nodeId, ok := routes.get("alice"); !ok || nodeId != "node-a" {
 		t.Fatalf("expected node-a hit, got %q %v", nodeId, ok)
 	}
+
+	// invalidation forgets the entry, e.g. after a peer rejected a tunnel
+	routes.invalidate("alice")
+	if _, ok := routes.get("alice"); ok {
+		t.Fatal("expected miss after invalidation")
+	}
 }
 
 func TestRouteCacheExpires(t *testing.T) {
